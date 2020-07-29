@@ -1,4 +1,5 @@
 use std::path::Path;
+use serde::{Deserialize, Serialize};
 use ndarray::{ArrayViewD, ArrayView, Array, ArrayD, Ix1};
 
 use crate::game::F;
@@ -11,6 +12,7 @@ pub type PolicyView<'a> = ArrayView<'a, f32, Ix1>;
 pub type SerializedPolicy = Vec<f32>;
 pub type Value = f32;
 
+#[derive(Serialize, Deserialize)]
 pub struct TrainingSample {
     pub board: BoardFeatures,
     pub pi: Policy,

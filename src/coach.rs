@@ -1,9 +1,13 @@
+use bincode;
 use crossbeam::{channel, scope};
 use pbr::ProgressBar;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
+use std::fs;
+use std::path::Path;
 use std::thread;
 
 use crate::async_mcts::AsyncMcts;
@@ -12,7 +16,6 @@ use crate::nnet::NNet;
 use crate::nnet::{BoardFeatures, BoardFeaturesView, Policy, TrainingSample, Value};
 
 pub struct Coach {
-    history: Vec<VecDeque<TrainingSample>>,
     update_threshold: f32,
     temp_threshold: usize,
     max_history_length: usize,
@@ -50,8 +53,7 @@ impl Coach {
                 0.0
             };
 
-            let pi = mcts
-                .get_action_prob(&canonical_board, temp, episode_id, rng);
+            let pi = mcts.get_action_prob(&canonical_board, temp, episode_id, rng);
 
             let sym = canonical_board.get_symmetries(pi.view());
 
@@ -82,8 +84,33 @@ impl Coach {
         }
     }
 
-    pub fn learn<G: Game, N: NNet>(&mut self, verbose: bool, rng: &mut SmallRng) {
+    pub fn save_train_examples<P: AsRef<Path>>(
+        &self,
+        examples: &VecDeque<Vec<TrainingSample>>,
+        iteration: usize,
+        checkpoint: P,
+    ) {
+        let filename = checkpoint
+            .as_ref()
+            .join(Path::new(&format!("/{}.examples", iteration)));
+
+        //let json_rep = serde_json::to_string(&examples).unwrap();
+        //fs::write(&filename, json_rep).expect(&format!("unable to write iteration {}", iteration));
+
+        let encoded = bincode::serialize(&examples).unwrap();
+        fs::write(&filename, encoded).expect(&format!("unable to write iteration {}", iteration));
+    }
+
+    pub fn learn<G: Game, N: NNet, P: AsRef<Path>>(
+        &mut self,
+        checkpoint: P,
+        skip_first_play: bool,
+        verbose: bool,
+        rng: &mut SmallRng,
+    ) {
         scope(|scope| {
+            let mut history: Vec<VecDeque<TrainingSample>> = Vec::new();
+
             // set up inference thread
             let (tx_give, rx_give) = channel::bounded(0);
             let (tx_data, rx_data) = channel::unbounded();
@@ -108,7 +135,7 @@ impl Coach {
                 };
                 let pb_send = pb.is_some();
 
-                let mut iteration_train_examples = VecDeque::new();
+                let mut iteration_train_examples: VecDeque<TrainingSample> = VecDeque::new();
 
                 let (pb_tx, pb_rx) = channel::unbounded();
 
@@ -146,17 +173,26 @@ impl Coach {
                             // cloned rng state
                             let mut rng = rng.clone();
 
-                            self.execute_episode(mcts, episode_id, &mut rng);
+                            let result = self.execute_episode(mcts, episode_id, &mut rng);
 
                             // advance episode progress bar
                             if pb_send {
                                 pb_tx.send(()).unwrap()
                             }
+
+                            result
                         })
+                        .flatten()
                         .collect::<VecDeque<_>>(),
                 );
 
                 pb_thread.map(|pb_thread| pb_thread.join().unwrap());
+
+                history.push(iteration_train_examples);
+
+                if history.len() > self.max_history_length {
+                    history.pop();
+                }
             }
 
             inference_thread.join().unwrap();
