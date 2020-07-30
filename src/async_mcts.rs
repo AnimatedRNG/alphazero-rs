@@ -4,7 +4,9 @@ use ndarray::{Array, Ix1, Zip};
 use rand::rngs::{SmallRng, ThreadRng};
 use rand::seq::IteratorRandom;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::game::{Game, F};
 use crate::nnet::{BoardFeatures, NNet, Policy, SerializedBoardFeatures, SerializedPolicy, Value};
@@ -108,6 +110,7 @@ impl<G: Game> AsyncMcts<G> {
     pub fn inference_thread(
         rx: Receiver<(usize, SerializedBoardFeatures)>,
         rx_send: Receiver<(usize, Sender<(SerializedPolicy, Value)>)>,
+        rx_checkpoint: Receiver<PathBuf>,
         nnet: impl NNet,
         feature_shape: Vec<usize>,
     ) {
@@ -134,6 +137,16 @@ impl<G: Game> AsyncMcts<G> {
                         },
                         Ok((i, tx)) => {
                             tx_ret.insert(i, tx);
+                        }
+                    }
+                },
+                recv(rx_checkpoint) -> msg => {
+                    match msg {
+                        Err(_) => {
+                            break;
+                        },
+                        Ok(p) => {
+                            nnet.save_checkpoint(p);
                         }
                     }
                 }

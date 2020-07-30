@@ -1,5 +1,6 @@
 use bincode;
 use crossbeam::{channel, scope};
+use log::{info, warn};
 use pbr::ProgressBar;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
@@ -7,7 +8,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 use crate::async_mcts::AsyncMcts;
@@ -164,6 +165,7 @@ impl Coach {
             // set up inference thread
             let (tx_give, rx_give) = channel::bounded(0);
             let (tx_data, rx_data) = channel::unbounded();
+            let (tx_checkpoint, rx_checkpoint) = channel::bounded(0);
 
             let feature_shape = G::get_feature_shape();
 
@@ -171,7 +173,13 @@ impl Coach {
 
             // persistent inference thread
             let inference_thread = scope.spawn(move |_| {
-                AsyncMcts::<G>::inference_thread(rx_data, rx_give, nnet, feature_shape)
+                AsyncMcts::<G>::inference_thread(
+                    rx_data,
+                    rx_give,
+                    rx_checkpoint,
+                    nnet,
+                    feature_shape,
+                )
             });
 
             let pool = rayon::ThreadPoolBuilder::new()
@@ -250,10 +258,22 @@ impl Coach {
                 self.history.push(iteration_train_examples);
 
                 if self.history.len() > self.max_history_length {
+                    warn!("History is too long, removing last entry");
                     self.history.pop();
                 }
 
+                info!("Saving train examples...");
                 self.save_train_examples(iteration, &checkpoint);
+                info!("Saved!");
+
+                info!("Shuffling train examples...");
+                let mut all_train_examples: Vec<_> = self.history.iter().flatten().collect();
+                all_train_examples.shuffle(rng);
+                info!("Shuffled!");
+
+                tx_checkpoint
+                    .send(checkpoint.as_ref().to_path_buf())
+                    .unwrap();
             }
 
             inference_thread.join().unwrap();

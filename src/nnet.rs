@@ -26,7 +26,7 @@ pub trait NNet: Send + Clone + 'static {
 
     fn predict(&self, board: BoardFeaturesView) -> (Policy, Value);
 
-    fn save_checkpoint(self, path: &Path);
+    fn save_checkpoint<P: AsRef<Path>>(&self, path: P);
 
-    fn load_checkpoint(&mut self, path: &Path);
+    fn load_checkpoint<P: AsRef<Path>>(&mut self, path: &P);
 }
