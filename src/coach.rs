@@ -16,6 +16,7 @@ use crate::nnet::NNet;
 use crate::nnet::{BoardFeatures, BoardFeaturesView, Policy, TrainingSample, Value};
 
 pub struct Coach {
+    history: Vec<VecDeque<TrainingSample>>,
     update_threshold: f32,
     temp_threshold: usize,
     max_history_length: usize,
@@ -29,6 +30,62 @@ pub struct Coach {
 }
 
 impl Coach {
+    pub fn setup<P: AsRef<Path>>(
+        checkpoint_directory: P,
+        update_threshold: f32,
+        temp_threshold: usize,
+        max_history_length: usize,
+        num_episode_threads: usize,
+        num_iters: usize,
+        num_eps: usize,
+        num_sims: usize,
+        num_sim_threads: usize,
+        max_depth: usize,
+        cpuct: i32,
+    ) -> Coach {
+        let checkpoint_dir_paths = fs::read_dir(&checkpoint_directory);
+
+        let history: Vec<VecDeque<TrainingSample>> = match checkpoint_dir_paths {
+            Ok(checkpoint_dir_paths) => {
+                let most_recent_checkpoint = checkpoint_dir_paths
+                    .max_by_key(|path| {
+                        path.as_ref()
+                            .unwrap()
+                            .path()
+                            .file_stem()
+                            .unwrap()
+                            .to_str()
+                            .unwrap()
+                            .parse::<usize>()
+                            .unwrap()
+                    })
+                    .unwrap()
+                    .unwrap()
+                    .path();
+                let checkpoint = fs::read(most_recent_checkpoint).unwrap();
+                bincode::deserialize(&checkpoint).unwrap()
+            }
+            Err(_) => {
+                fs::create_dir(checkpoint_directory).unwrap();
+                Vec::new()
+            }
+        };
+
+        Coach {
+            history: history,
+            update_threshold: update_threshold,
+            temp_threshold: temp_threshold,
+            max_history_length: max_history_length,
+            num_episode_threads: num_episode_threads,
+            num_iters: num_iters,
+            num_eps: num_eps,
+            num_sims: num_sims,
+            num_sim_threads: num_sim_threads,
+            max_depth: max_depth,
+            cpuct: cpuct,
+        }
+    }
+
     pub fn execute_episode<G: Game>(
         &self,
         mcts: AsyncMcts<G>,
@@ -109,8 +166,6 @@ impl Coach {
         rng: &mut SmallRng,
     ) {
         scope(|scope| {
-            let mut history: Vec<VecDeque<TrainingSample>> = Vec::new();
-
             // set up inference thread
             let (tx_give, rx_give) = channel::bounded(0);
             let (tx_data, rx_data) = channel::unbounded();
@@ -123,6 +178,11 @@ impl Coach {
             let inference_thread = scope.spawn(move |_| {
                 AsyncMcts::<G>::inference_thread(rx_data, rx_give, nnet, feature_shape)
             });
+
+            let pool = rayon::ThreadPoolBuilder::new()
+                .num_threads(self.num_episode_threads)
+                .build()
+                .unwrap();
 
             for iteration in 0..self.num_iters {
                 let pb = if verbose {
@@ -157,41 +217,43 @@ impl Coach {
                     None
                 };
 
-                iteration_train_examples.extend(
-                    (0..self.num_eps)
-                        .into_par_iter()
-                        .map(|episode_id| {
-                            let mcts = AsyncMcts::<G>::default(
-                                self.num_sims,
-                                self.num_sim_threads,
-                                self.max_depth,
-                                self.cpuct,
-                                tx_give.clone(),
-                                tx_data.clone(),
-                            );
+                pool.install(|| {
+                    iteration_train_examples.extend(
+                        (0..self.num_eps)
+                            .into_par_iter()
+                            .map(|episode_id| {
+                                let mcts = AsyncMcts::<G>::default(
+                                    self.num_sims,
+                                    self.num_sim_threads,
+                                    self.max_depth,
+                                    self.cpuct,
+                                    tx_give.clone(),
+                                    tx_data.clone(),
+                                );
 
-                            // cloned rng state
-                            let mut rng = rng.clone();
+                                // cloned rng state
+                                let mut rng = rng.clone();
 
-                            let result = self.execute_episode(mcts, episode_id, &mut rng);
+                                let result = self.execute_episode(mcts, episode_id, &mut rng);
 
-                            // advance episode progress bar
-                            if pb_send {
-                                pb_tx.send(()).unwrap()
-                            }
+                                // advance episode progress bar
+                                if pb_send {
+                                    pb_tx.send(()).unwrap()
+                                }
 
-                            result
-                        })
-                        .flatten()
-                        .collect::<VecDeque<_>>(),
-                );
+                                result
+                            })
+                            .flatten()
+                            .collect::<VecDeque<_>>(),
+                    )
+                });
 
                 pb_thread.map(|pb_thread| pb_thread.join().unwrap());
 
-                history.push(iteration_train_examples);
+                self.history.push(iteration_train_examples);
 
-                if history.len() > self.max_history_length {
-                    history.pop();
+                if self.history.len() > self.max_history_length {
+                    self.history.pop();
                 }
             }
 
