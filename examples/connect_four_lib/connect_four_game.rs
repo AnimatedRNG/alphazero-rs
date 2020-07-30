@@ -1,5 +1,5 @@
-extern crate array_init;
 extern crate alphazero_rs;
+extern crate array_init;
 
 use alphazero_rs::game::{Game, F};
 use alphazero_rs::nnet::{Policy, PolicyView};
@@ -23,9 +23,9 @@ pub struct ConnectFourGame {
 impl Clone for ConnectFourGame {
     fn clone(&self) -> ConnectFourGame {
         ConnectFourGame {
-            s: self.s.clone(),
-            heights: self.heights.clone(),
-            me: self.me.clone(),
+            s: self.s,
+            heights: self.heights,
+            me: self.me,
         }
     }
 }
@@ -40,7 +40,7 @@ impl fmt::Display for ConnectFourGame {
                     0 => "_",
                     1 => "1",
                     -1 => "2",
-                    _ => panic!("invalid value in board")
+                    _ => panic!("invalid value in board"),
                 });
             }
             rows.push(cols.join(" "));
@@ -106,7 +106,7 @@ impl Game for ConnectFourGame {
 
         let height = &mut next_state.heights[action];
         debug_assert!(height < &mut DEFAULT_HEIGHT);
-        *height = *height + 1;
+        *height += 1;
         next_state.s[action][*height] = player;
 
         (ConnectFourGame::empty(), 1 - player)
@@ -159,10 +159,11 @@ impl Game for ConnectFourGame {
         for k in 0..DEFAULT_WIDTH + DEFAULT_HEIGHT - 2 {
             for j in 0..k {
                 let i = k - j;
-                if i < DEFAULT_HEIGHT && j < DEFAULT_WIDTH {
-                    if check(i, j, &mut running_sum).is_some() {
-                        return player;
-                    }
+                if i < DEFAULT_HEIGHT
+                    && j < DEFAULT_WIDTH
+                    && check(i, j, &mut running_sum).is_some()
+                {
+                    return player;
                 }
             }
         }
@@ -171,10 +172,11 @@ impl Game for ConnectFourGame {
         for k in 0..DEFAULT_WIDTH + DEFAULT_HEIGHT - 2 {
             for j in (0..k).rev() {
                 let i = k - j;
-                if i < DEFAULT_HEIGHT && j < DEFAULT_WIDTH {
-                    if check(i, j, &mut running_sum).is_some() {
-                        return player;
-                    }
+                if i < DEFAULT_HEIGHT
+                    && j < DEFAULT_WIDTH
+                    && check(i, j, &mut running_sum).is_some()
+                {
+                    return player;
                 }
             }
         }
@@ -182,7 +184,7 @@ impl Game for ConnectFourGame {
         0
     }
 
-    fn get_canonical_form(&self, player: i8) -> ConnectFourGame {
+    fn get_canonical_form(&self, _player: i8) -> ConnectFourGame {
         let mut new_board = self.clone();
         new_board.me = -new_board.me;
 
@@ -193,10 +195,7 @@ impl Game for ConnectFourGame {
         // add flipped case
         vec![
             (self.clone(), pi.to_owned()),
-            (
-                self.clone().flip(),
-                pi.slice(s![..;-1]).to_owned(),
-            ),
+            (self.clone().flip(), pi.slice(s![..;-1]).to_owned()),
         ]
     }
 
@@ -205,6 +204,7 @@ impl Game for ConnectFourGame {
         0.0
     }
 
+    #[allow(clippy::if_same_then_else)]
     fn to_features(&self) -> ArrayD<F> {
         let mut f = ArrayD::zeros(IxDyn(&[2, DEFAULT_HEIGHT, DEFAULT_WIDTH]));
 

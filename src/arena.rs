@@ -12,7 +12,7 @@ pub fn play_game<G: Game>(
     assert!(player_actions.len() == 2);
 
     let cur_player = 1;
-    let board: G = board.clone().unwrap_or(G::get_init_board());
+    let board: G = board.clone().unwrap_or_else(G::get_init_board);
     let mut iteration = 0;
 
     while board.get_game_ended(cur_player) == 0 {
@@ -24,7 +24,7 @@ pub fn play_game<G: Game>(
 
         let canonical_board = board.get_canonical_form(cur_player);
 
-        let action = player_actions[if &cur_player == &1 { 0 } else { 1 }](&canonical_board);
+        let action = player_actions[if cur_player == 1 { 0 } else { 1 }](&canonical_board);
 
         let valids = canonical_board.get_valid_moves(1);
 

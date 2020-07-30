@@ -1,23 +1,21 @@
-use bincode;
 use crossbeam::{channel, scope};
 use pbr::ProgressBar;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
-use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 use std::thread;
 
 use crate::async_mcts::AsyncMcts;
-use crate::game::{Game, F};
+use crate::game::Game;
 use crate::nnet::NNet;
-use crate::nnet::{BoardFeatures, BoardFeaturesView, Policy, TrainingSample, Value};
+use crate::nnet::{BoardFeatures, Policy, TrainingSample};
 
 pub struct Coach {
     history: Vec<VecDeque<TrainingSample>>,
-    update_threshold: f32,
+    _update_threshold: f32,
     temp_threshold: usize,
     max_history_length: usize,
     num_episode_threads: usize,
@@ -30,6 +28,7 @@ pub struct Coach {
 }
 
 impl Coach {
+    #[allow(clippy::too_many_arguments)]
     pub fn setup<P: AsRef<Path>>(
         checkpoint_directory: P,
         update_threshold: f32,
@@ -72,17 +71,17 @@ impl Coach {
         };
 
         Coach {
-            history: history,
-            update_threshold: update_threshold,
-            temp_threshold: temp_threshold,
-            max_history_length: max_history_length,
-            num_episode_threads: num_episode_threads,
-            num_iters: num_iters,
-            num_eps: num_eps,
-            num_sims: num_sims,
-            num_sim_threads: num_sim_threads,
-            max_depth: max_depth,
-            cpuct: cpuct,
+            history,
+            _update_threshold: update_threshold,
+            temp_threshold,
+            max_history_length,
+            num_episode_threads,
+            num_iters,
+            num_eps,
+            num_sims,
+            num_sim_threads,
+            max_depth,
+            cpuct,
         }
     }
 
@@ -150,7 +149,8 @@ impl Coach {
         //fs::write(&filename, json_rep).expect(&format!("unable to write iteration {}", iteration));
 
         let encoded = bincode::serialize(&self.history).unwrap();
-        fs::write(&filename, encoded).expect(&format!("unable to write iteration {}", iteration));
+        fs::write(&filename, encoded)
+            .unwrap_or_else(|_| panic!("unable to write iteration {}", iteration));
     }
 
     pub fn learn<G: Game, N: NNet, P: AsRef<Path>>(
@@ -244,7 +244,9 @@ impl Coach {
                         )
                     });
 
-                    pb_thread.map(|pb_thread| pb_thread.join().unwrap());
+                    if let Some(pb_thread) = pb_thread {
+                        pb_thread.join().unwrap();
+                    }
                 }
 
                 self.history.push(iteration_train_examples);

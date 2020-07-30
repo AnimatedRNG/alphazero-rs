@@ -1,14 +1,14 @@
 use crossbeam::{channel, scope, select, Receiver, Sender};
 use log::warn;
-use ndarray::{Array, Ix1, Zip};
-use rand::rngs::{SmallRng, ThreadRng};
+use ndarray::{Array, Zip};
+use rand::rngs::SmallRng;
 use rand::seq::IteratorRandom;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::game::{Game, F};
+use crate::game::Game;
 use crate::nnet::{BoardFeatures, NNet, Policy, SerializedBoardFeatures, SerializedPolicy, Value};
-use crate::node::{Node, NodeState, NodeStore};
+use crate::node::{NodeState, NodeStore};
 
 const RESERVE_SPACE: usize = 2048;
 
@@ -33,12 +33,12 @@ impl<G: Game> AsyncMcts<G> {
     ) -> Self {
         AsyncMcts {
             nodes: NodeStore::<G>::new(RESERVE_SPACE),
-            num_sims: num_sims,
-            num_threads: num_threads,
-            max_depth: max_depth,
-            tx_give: tx_give,
-            tx_data: tx_data,
-            cpuct: cpuct,
+            num_sims,
+            num_threads,
+            max_depth,
+            tx_give,
+            tx_data,
+            cpuct,
         }
     }
 
@@ -53,12 +53,12 @@ impl<G: Game> AsyncMcts<G> {
     ) -> Self {
         AsyncMcts {
             nodes: NodeStore::<G>::from_root(RESERVE_SPACE, s),
-            num_sims: num_sims,
-            num_threads: num_threads,
-            max_depth: max_depth,
-            tx_give: tx_give,
-            tx_data: tx_data,
-            cpuct: cpuct,
+            num_sims,
+            num_threads,
+            max_depth,
+            tx_give,
+            tx_data,
+            cpuct,
         }
     }
 
