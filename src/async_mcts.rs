@@ -6,7 +6,6 @@ use rand::seq::IteratorRandom;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 
 use crate::game::Game;
 use crate::nnet::{BoardFeatures, NNet, Policy, SerializedBoardFeatures, SerializedPolicy, Value};

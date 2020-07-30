@@ -6,7 +6,7 @@ use rand::seq::SliceRandom;
 use rayon::prelude::*;
 use std::collections::VecDeque;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::thread;
 
 use crate::async_mcts::AsyncMcts;
