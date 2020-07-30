@@ -1,7 +1,3 @@
-mod connect_four {
-    mod connect_four_game;
-}
+mod connect_four_lib;
 
-fn main() {
-
-}
+fn main() {}

@@ -1,7 +1,7 @@
 use array_init::array_init;
 use ccl::dhashmap::DHashMap;
 use crossbeam::atomic::AtomicCell;
-use ndarray::{Array, ArrayD, Ix1, IxDyn};
+use ndarray::{Array, Ix1};
 use std::alloc::{AllocInit, AllocRef, Global, Layout};
 use std::cell::UnsafeCell;
 use std::marker::PhantomPinned;
@@ -39,7 +39,7 @@ impl<G: Game> Node<G> {
     pub fn empty(win_scale: f32) -> Node<G> {
         Node {
             win_counter: AtomicU64::new(0x7FFFFFFF00000000),
-            win_scale: win_scale,
+            win_scale,
             a: 0,
             e: AtomicCell::new(0.0),
             mu: NodeMutableState {
@@ -174,7 +174,7 @@ impl<G: Game> RawNodeStore<G> {
             RawNodeStore {
                 ptr: ptrs,
                 protected: protected_ptrs,
-                segments: segments,
+                segments,
                 num_segments: AtomicUsize::new(1),
                 cap: AtomicUsize::new(cap),
                 growing: AtomicBool::new(false),
@@ -251,16 +251,13 @@ impl<G: Game> Drop for NodeStore<G> {
     fn drop(&mut self) {
         // spinlock till we drop
         loop {
-            match self.buf.growing.compare_exchange_weak(
-                false,
-                true,
-                Ordering::SeqCst,
-                Ordering::Relaxed,
-            ) {
-                Ok(_) => {
-                    break;
-                }
-                Err(_) => {}
+            if self
+                .buf
+                .growing
+                .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::Relaxed)
+                .is_ok()
+            {
+                break;
             }
         }
 
@@ -312,7 +309,7 @@ impl<G: Game> NodeStore<G> {
                 .unwrap()
                 .unwrap()
                 .as_ptr()
-                .offset((i - start_idx) as isize)
+                .add(i - start_idx)
         }
     }
 
@@ -332,7 +329,7 @@ impl<G: Game> NodeStore<G> {
                 .unwrap()
                 .unwrap()
                 .as_ptr()
-                .offset((i - start_idx) as isize)
+                .add(i - start_idx)
         }
     }
 
@@ -352,7 +349,7 @@ impl<G: Game> NodeStore<G> {
                 .unwrap()
                 .unwrap()
                 .as_ptr()
-                .offset((i - start_idx) as isize)
+                .add(i - start_idx)
         }
     }
 
@@ -404,13 +401,14 @@ impl<G: Game> NodeStore<G> {
     pub fn get(&self, idx: usize) -> Option<Pin<&Node<G>>> {
         let l = self.resolve(idx);
 
-        l.and_then(|l| unsafe { Some(Pin::new_unchecked(&self.offset_ptr(l).as_ref().unwrap().0)) })
+        l.map(|l| unsafe { Pin::new_unchecked(&self.offset_ptr(l).as_ref().unwrap().0) })
     }
 
     pub fn lookup_state_id(&self, s: &G) -> Option<usize> {
-        self.seen.get(s).and_then(|s| Some(*s))
+        self.seen.get(s).map(|s| *s)
     }
 
+    #[allow(unused)]
     pub fn lookup_state(&self, s: &G) -> Option<Pin<&Node<G>>> {
         self.seen.get(s).and_then(|idx| self.get(*idx))
     }
@@ -537,10 +535,9 @@ impl<G: Game> NodeStore<G> {
 
     pub fn lock(&self, idx: usize) -> bool {
         let protected = unsafe { self.offset_protected_ptr(idx).as_ref() }.unwrap();
-        match protected.compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed) {
-            Err(_) => false,
-            Ok(_) => true,
-        }
+        protected
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
+            .is_ok()
     }
 
     pub fn unlock(&self, idx: usize) {
@@ -570,7 +567,7 @@ impl<G: Game> NodeStore<G> {
         buf.sort_by(|(_, u1), (_, u2)| u2.partial_cmp(u1).unwrap_or(std::cmp::Ordering::Equal));
     }
 
-    pub fn best_child(&self, idx: usize, cpuct: i32, lock_leaf: bool) -> (usize, NodeState) {
+    pub fn best_child(&self, idx: usize, cpuct: i32, _lock_leaf: bool) -> (usize, NodeState) {
         let node = self.get(idx).unwrap();
 
         let mut buf: Vec<(usize, f32)> = Vec::with_capacity(node.children.len());
@@ -620,6 +617,7 @@ impl<G: Game> NodeStore<G> {
 unsafe impl<G: Game> Sync for NodeStore<G> {}
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)]
 mod tests {
     mod dummy_game;
     use super::*;
@@ -708,8 +706,8 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::needless_range_loop)]
     fn test_nodestore_many() {
-        let game = DummyGame::new(0);
         let nodes = NodeStore::<DummyGame>::empty(2048);
 
         let mut idx = Vec::new();
@@ -728,7 +726,6 @@ mod tests {
 
     #[test]
     fn test_nodestore_some_parallel() {
-        let game = DummyGame::new(0);
         let nodes = NodeStore::<DummyGame>::empty(2048);
 
         let idx: HashMap<usize, usize> = (0..1024)
@@ -748,7 +745,6 @@ mod tests {
 
     #[test]
     fn test_nodestore_many_parallel() {
-        let game = DummyGame::new(0);
         let nodes = NodeStore::<DummyGame>::empty(2048);
 
         let idx: HashMap<usize, usize> = (0..8192)
@@ -768,7 +764,6 @@ mod tests {
 
     #[test]
     fn test_nodestore_parallel_push_then_get() {
-        let game = DummyGame::new(0);
         let nodes = NodeStore::<DummyGame>::empty(2048);
 
         let idx: HashMap<usize, usize> = (0..8192)
@@ -869,9 +864,9 @@ mod tests {
         assert!(nodes.seen.len() == 1);
 
         // insertion of s at location 1 creates a link, already seen
-        nodes.push(node.clone());
+        nodes.push(node);
         assert!(nodes.lock(1));
-        assert!(!nodes.upgrade(1, s.clone()).unwrap());
+        assert!(!nodes.upgrade(1, s).unwrap());
         assert!(nodes.state(1) == NodeState::Exists(false));
     }
 
@@ -880,13 +875,13 @@ mod tests {
         let nodes = NodeStore::<DummyGame>::empty(2048);
 
         let node = Node::empty(10000.0f32);
-        let idx = nodes.push(node.clone());
+        let idx = nodes.push(node);
         assert!(nodes.state(idx) == NodeState::PlaceHolder);
 
         let s = DummyGame::new(0);
 
         assert!(nodes.lock(idx));
-        nodes.upgrade(idx, s.clone()).unwrap();
+        nodes.upgrade(idx, s).unwrap();
 
         // trying to lock a second time fails
         assert!(!nodes.lock(idx));

@@ -2,7 +2,7 @@ use crate::game::{Game, F};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use ndarray::{Array, ArrayD, ArrayViewD, Ix1, IxDyn};
+use ndarray::{Array, ArrayD, Ix1, IxDyn};
 
 use crate::nnet::{Policy, PolicyView};
 //pub type Policy = Array<f32, Ix1>;
@@ -54,19 +54,19 @@ impl Game for DummyGame {
         vec![1]
     }
 
-    fn get_next_state(&self, player: i8, action: u8) -> (DummyGame, i8) {
+    fn get_next_state(&self, player: i8, _action: u8) -> (DummyGame, i8) {
         (DummyGame::new(self._s + 1), 1 - player)
     }
 
-    fn get_valid_moves(&self, player: i8) -> Array<u8, Ix1> {
+    fn get_valid_moves(&self, _player: i8) -> Array<u8, Ix1> {
         Array::zeros(1)
     }
 
-    fn get_game_ended(&self, player: i8) -> i8 {
+    fn get_game_ended(&self, _player: i8) -> i8 {
         0
     }
 
-    fn get_canonical_form(&self, player: i8) -> DummyGame {
+    fn get_canonical_form(&self, _player: i8) -> DummyGame {
         DummyGame::new(0)
     }
 
