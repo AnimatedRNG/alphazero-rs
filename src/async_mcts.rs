@@ -1,7 +1,7 @@
 use crossbeam::{channel, scope, select, Receiver, Sender};
 use log::warn;
 use ndarray::{Array, Ix1, Zip};
-use rand::rngs::{ThreadRng, SmallRng};
+use rand::rngs::{SmallRng, ThreadRng};
 use rand::seq::IteratorRandom;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};

@@ -1,15 +1,15 @@
 use crate::game::{Game, F};
-use std::hash::{Hash, Hasher};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
-use ndarray::{Array, ArrayViewD, ArrayD, Ix1, IxDyn};
+use ndarray::{Array, ArrayD, ArrayViewD, Ix1, IxDyn};
 
 use crate::nnet::{Policy, PolicyView};
 //pub type Policy = Array<f32, Ix1>;
 //pub type PolicyView = Array<f32, Ix1>;
 
 pub struct DummyGame {
-    _s: u8
+    _s: u8,
 }
 
 impl Clone for DummyGame {
@@ -41,7 +41,7 @@ impl Eq for DummyGame {}
 
 impl DummyGame {
     pub fn new(v: u8) -> DummyGame {
-        DummyGame {_s: v}
+        DummyGame { _s: v }
     }
 }
 
@@ -54,11 +54,7 @@ impl Game for DummyGame {
         vec![1]
     }
 
-    fn get_next_state(
-        &self,
-        player: i8,
-        action: u8,
-    ) -> (DummyGame, i8) {
+    fn get_next_state(&self, player: i8, action: u8) -> (DummyGame, i8) {
         (DummyGame::new(self._s + 1), 1 - player)
     }
 
@@ -74,10 +70,7 @@ impl Game for DummyGame {
         DummyGame::new(0)
     }
 
-    fn get_symmetries(
-        &self,
-        pi: PolicyView,
-    ) -> Vec<(Self, Policy)> {
+    fn get_symmetries(&self, pi: PolicyView) -> Vec<(Self, Policy)> {
         vec![(DummyGame::new(self._s), pi.to_owned())]
     }
 

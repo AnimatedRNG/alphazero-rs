@@ -1,7 +1,7 @@
+use ndarray::{Array, ArrayD, Ix1};
+use std::cmp::Eq;
 use std::fmt::Display;
 use std::hash::Hash;
-use std::cmp::Eq;
-use ndarray::{Array, ArrayD, Ix1};
 
 use crate::nnet::{Policy, PolicyView};
 
@@ -20,10 +20,7 @@ pub trait Game: Display + Sized + Send + Clone + Hash + Eq {
 
     fn get_canonical_form(&self, player: i8) -> Self;
 
-    fn get_symmetries(
-        &self,
-        pi: PolicyView,
-    ) -> Vec<(Self, Policy)>;
+    fn get_symmetries(&self, pi: PolicyView) -> Vec<(Self, Policy)>;
 
     fn eval_heuristic(&self) -> f32;
 

@@ -1,6 +1,6 @@
-use std::path::Path;
+use ndarray::{Array, ArrayD, ArrayView, ArrayViewD, Ix1};
 use serde::{Deserialize, Serialize};
-use ndarray::{ArrayViewD, ArrayView, Array, ArrayD, Ix1};
+use std::path::Path;
 
 use crate::game::F;
 
@@ -16,7 +16,7 @@ pub type Value = f32;
 pub struct TrainingSample {
     pub board: BoardFeatures,
     pub pi: Policy,
-    pub v: Value
+    pub v: Value,
 }
 
 pub trait NNet: Send + Clone + 'static {
