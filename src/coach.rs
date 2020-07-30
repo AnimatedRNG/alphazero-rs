@@ -141,12 +141,7 @@ impl Coach {
         }
     }
 
-    pub fn save_train_examples<P: AsRef<Path>>(
-        &self,
-        examples: &VecDeque<Vec<TrainingSample>>,
-        iteration: usize,
-        checkpoint: P,
-    ) {
+    pub fn save_train_examples<P: AsRef<Path>>(&self, iteration: usize, checkpoint: P) {
         let filename = checkpoint
             .as_ref()
             .join(Path::new(&format!("/{}.examples", iteration)));
@@ -154,7 +149,7 @@ impl Coach {
         //let json_rep = serde_json::to_string(&examples).unwrap();
         //fs::write(&filename, json_rep).expect(&format!("unable to write iteration {}", iteration));
 
-        let encoded = bincode::serialize(&examples).unwrap();
+        let encoded = bincode::serialize(&self.history).unwrap();
         fs::write(&filename, encoded).expect(&format!("unable to write iteration {}", iteration));
     }
 
@@ -217,44 +212,48 @@ impl Coach {
                     None
                 };
 
-                pool.install(|| {
-                    iteration_train_examples.extend(
-                        (0..self.num_eps)
-                            .into_par_iter()
-                            .map(|episode_id| {
-                                let mcts = AsyncMcts::<G>::default(
-                                    self.num_sims,
-                                    self.num_sim_threads,
-                                    self.max_depth,
-                                    self.cpuct,
-                                    tx_give.clone(),
-                                    tx_data.clone(),
-                                );
+                if !skip_first_play || iteration > 0 {
+                    pool.install(|| {
+                        iteration_train_examples.extend(
+                            (0..self.num_eps)
+                                .into_par_iter()
+                                .map(|episode_id| {
+                                    let mcts = AsyncMcts::<G>::default(
+                                        self.num_sims,
+                                        self.num_sim_threads,
+                                        self.max_depth,
+                                        self.cpuct,
+                                        tx_give.clone(),
+                                        tx_data.clone(),
+                                    );
 
-                                // cloned rng state
-                                let mut rng = rng.clone();
+                                    // cloned rng state
+                                    let mut rng = rng.clone();
 
-                                let result = self.execute_episode(mcts, episode_id, &mut rng);
+                                    let result = self.execute_episode(mcts, episode_id, &mut rng);
 
-                                // advance episode progress bar
-                                if pb_send {
-                                    pb_tx.send(()).unwrap()
-                                }
+                                    // advance episode progress bar
+                                    if pb_send {
+                                        pb_tx.send(()).unwrap()
+                                    }
 
-                                result
-                            })
-                            .flatten()
-                            .collect::<VecDeque<_>>(),
-                    )
-                });
+                                    result
+                                })
+                                .flatten()
+                                .collect::<VecDeque<_>>(),
+                        )
+                    });
 
-                pb_thread.map(|pb_thread| pb_thread.join().unwrap());
+                    pb_thread.map(|pb_thread| pb_thread.join().unwrap());
+                }
 
                 self.history.push(iteration_train_examples);
 
                 if self.history.len() > self.max_history_length {
                     self.history.pop();
                 }
+
+                self.save_train_examples(iteration - 1, &checkpoint);
             }
 
             inference_thread.join().unwrap();
