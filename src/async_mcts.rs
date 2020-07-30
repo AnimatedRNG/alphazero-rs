@@ -1,6 +1,6 @@
 use crossbeam::{channel, scope, select, Receiver, Sender};
 use log::warn;
-use ndarray::{Array, Zip};
+use ndarray::{Array, Axis, Zip};
 use rand::rngs::SmallRng;
 use rand::seq::IteratorRandom;
 use std::collections::HashMap;
@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::game::Game;
-use crate::nnet::{BoardFeatures, NNet, Policy, SerializedBoardFeatures, SerializedPolicy, Value};
+use crate::nnet::*;
 use crate::node::{NodeState, NodeStore};
 
 const RESERVE_SPACE: usize = 2048;
@@ -110,10 +110,17 @@ impl<G: Game> AsyncMcts<G> {
         rx: Receiver<(usize, SerializedBoardFeatures)>,
         rx_send: Receiver<(usize, Sender<(SerializedPolicy, Value)>)>,
         rx_checkpoint: Receiver<PathBuf>,
+        batch_size: usize,
         nnet: impl NNet,
         feature_shape: Vec<usize>,
     ) {
         let mut tx_ret: HashMap<usize, Sender<(SerializedPolicy, Value)>> = HashMap::new();
+
+        let mut board_shape = feature_shape.clone();
+        board_shape.insert(0, batch_size);
+
+        let mut inference_batch = BatchedBoardFeatures::zeros(board_shape);
+        let mut batch_ids: Vec<usize> = Vec::new(); // batch id -> thread id
 
         loop {
             select! {
@@ -123,9 +130,27 @@ impl<G: Game> AsyncMcts<G> {
                             break;
                         },
                         Ok((i, board)) => {
-                            // TODO: actually implement batching...
-                            let (pi, v): (Policy, Value) = nnet.predict(Array::from_shape_vec(feature_shape.clone(), board).unwrap().view());
-                            tx_ret.get(&i).unwrap().send((pi.into_raw_vec(), v)).unwrap();
+                            // write batch into the buffer
+                            batch_ids.push(i);
+                            let batch_id = batch_ids.len();
+                            let mut batch_subview = inference_batch.index_axis_mut(Axis(0), batch_id);
+                            batch_subview.assign(&Array::from_shape_vec(feature_shape.clone(), board).unwrap().view());
+
+                            // when we need to respond to everyone
+                            if batch_ids.len() == batch_size {
+                                let (pis, vs): (BatchedPolicy, BatchedValue) = nnet.predict(inference_batch.view());
+
+                                for (batch_id, thread_id) in batch_ids.iter().enumerate() {
+                                    let pi = pis.index_axis(Axis(0), batch_id).to_owned().into_raw_vec();
+                                    let v = vs[batch_id];
+                                    tx_ret.get(&thread_id).unwrap().send((pi, v)).unwrap();
+                                }
+
+                                // reset the batch ids vector
+                                // no need to actually clear out inference_batch --
+                                // it'll get overwritten soon
+                                batch_ids.clear();
+                            }
                         }
                     }
                 },

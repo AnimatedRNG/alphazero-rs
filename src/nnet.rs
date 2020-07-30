@@ -1,4 +1,4 @@
-use ndarray::{Array, ArrayD, ArrayView, ArrayViewD, Ix1};
+use ndarray::{Array, ArrayD, ArrayView, ArrayViewD, Ix1, Ix2};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -6,10 +6,15 @@ use crate::game::F;
 
 pub type BoardFeatures = ArrayD<F>;
 pub type BoardFeaturesView<'a> = ArrayViewD<'a, F>;
+pub type BatchedBoardFeatures = ArrayD<F>;
+pub type BatchedBoardFeaturesView<'a> = ArrayViewD<'a, F>;
 pub type SerializedBoardFeatures = Vec<F>;
+pub type BatchedPolicy = Array<f32, Ix2>;
+pub type BatchedPolicyView<'a> = ArrayView<'a, f32, Ix2>;
 pub type Policy = Array<f32, Ix1>;
 pub type PolicyView<'a> = ArrayView<'a, f32, Ix1>;
 pub type SerializedPolicy = Vec<f32>;
+pub type BatchedValue<'a> = ArrayView<'a, f32, Ix1>;
 pub type Value = f32;
 
 #[derive(Serialize, Deserialize)]
@@ -24,7 +29,7 @@ pub trait NNet: Send + Clone + 'static {
 
     fn train(&self, examples: Vec<TrainingSample>);
 
-    fn predict(&self, board: BoardFeaturesView) -> (Policy, Value);
+    fn predict(&self, board: BatchedBoardFeaturesView) -> (BatchedPolicy, BatchedValue);
 
     fn save_checkpoint<P: AsRef<Path>>(&self, path: P);
 

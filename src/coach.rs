@@ -19,6 +19,7 @@ pub struct Coach {
     _update_threshold: f32,
     temp_threshold: usize,
     max_history_length: usize,
+    inference_batch_size: usize,
     num_episode_threads: usize,
     num_iters: usize,
     num_eps: usize,
@@ -35,6 +36,7 @@ impl Coach {
         update_threshold: f32,
         temp_threshold: usize,
         max_history_length: usize,
+        inference_batch_size: usize,
         num_episode_threads: usize,
         num_iters: usize,
         num_eps: usize,
@@ -71,11 +73,14 @@ impl Coach {
             }
         };
 
+        assert!(num_sims % inference_batch_size == 0);
+
         Coach {
             history,
             _update_threshold: update_threshold,
             temp_threshold,
             max_history_length,
+            inference_batch_size,
             num_episode_threads,
             num_iters,
             num_eps,
@@ -171,12 +176,15 @@ impl Coach {
 
             let nnet = N::new();
 
+            let inference_batch_size = self.inference_batch_size;
+
             // persistent inference thread
             let inference_thread = scope.spawn(move |_| {
                 AsyncMcts::<G>::inference_thread(
                     rx_data,
                     rx_give,
                     rx_checkpoint,
+                    inference_batch_size,
                     nnet,
                     feature_shape,
                 )
