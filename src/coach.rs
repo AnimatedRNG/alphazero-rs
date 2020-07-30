@@ -253,7 +253,7 @@ impl Coach {
                     self.history.pop();
                 }
 
-                self.save_train_examples(iteration - 1, &checkpoint);
+                self.save_train_examples(iteration, &checkpoint);
             }
 
             inference_thread.join().unwrap();
