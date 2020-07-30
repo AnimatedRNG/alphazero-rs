@@ -15,10 +15,11 @@ use crate::nnet::NNet;
 use crate::nnet::{BoardFeatures, Policy, TrainingSample};
 
 pub struct Coach {
-    history: Vec<VecDeque<TrainingSample>>,
+    history: VecDeque<VecDeque<TrainingSample>>,
     _update_threshold: f32,
     temp_threshold: usize,
     max_history_length: usize,
+    max_queue_length: usize,
     inference_batch_size: usize,
     num_episode_threads: usize,
     num_iters: usize,
@@ -36,6 +37,7 @@ impl Coach {
         update_threshold: f32,
         temp_threshold: usize,
         max_history_length: usize,
+        max_queue_length: usize,
         inference_batch_size: usize,
         num_episode_threads: usize,
         num_iters: usize,
@@ -47,7 +49,7 @@ impl Coach {
     ) -> Coach {
         let checkpoint_dir_paths = fs::read_dir(&checkpoint_directory);
 
-        let history: Vec<VecDeque<TrainingSample>> = match checkpoint_dir_paths {
+        let history: VecDeque<VecDeque<TrainingSample>> = match checkpoint_dir_paths {
             Ok(checkpoint_dir_paths) => {
                 let most_recent_checkpoint = checkpoint_dir_paths
                     .max_by_key(|path| {
@@ -69,7 +71,7 @@ impl Coach {
             }
             Err(_) => {
                 fs::create_dir(checkpoint_directory).unwrap();
-                Vec::new()
+                VecDeque::new()
             }
         };
 
@@ -80,6 +82,7 @@ impl Coach {
             _update_threshold: update_threshold,
             temp_threshold,
             max_history_length,
+            max_queue_length,
             inference_batch_size,
             num_episode_threads,
             num_iters,
@@ -150,9 +153,6 @@ impl Coach {
         let filename = checkpoint
             .as_ref()
             .join(Path::new(&format!("/{}.examples", iteration)));
-
-        //let json_rep = serde_json::to_string(&examples).unwrap();
-        //fs::write(&filename, json_rep).expect(&format!("unable to write iteration {}", iteration));
 
         let encoded = bincode::serialize(&self.history).unwrap();
         fs::write(&filename, encoded)
@@ -260,16 +260,21 @@ impl Coach {
                         )
                     });
 
+                    // only keep max_queue_length samples
+                    while iteration_train_examples.len() > self.max_queue_length {
+                        iteration_train_examples.pop_front();
+                    }
+
                     if let Some(pb_thread) = pb_thread {
                         pb_thread.join().unwrap();
                     }
                 }
 
-                self.history.push(iteration_train_examples);
+                self.history.push_back(iteration_train_examples);
 
                 if self.history.len() > self.max_history_length {
                     warn!("History is too long, removing last entry");
-                    self.history.pop();
+                    self.history.pop_front();
                 }
 
                 info!("Saving train examples...");
