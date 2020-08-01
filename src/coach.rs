@@ -176,12 +176,11 @@ impl Coach {
             // set up inference thread
             let (tx_give, rx_give) = channel::bounded(0);
             let (tx_data, rx_data) = channel::unbounded();
-            let (tx_checkpoint, rx_checkpoint) = channel::bounded(0);
             let (tx_train, rx_train) = channel::bounded(0);
 
             let feature_shape = G::get_feature_shape();
 
-            let nnet = N::new();
+            let nnet = N::new(&checkpoint);
 
             let inference_batch_size = self.inference_batch_size;
 
@@ -190,7 +189,6 @@ impl Coach {
                 AsyncMcts::<G>::inference_thread(
                     rx_data,
                     rx_give,
-                    rx_checkpoint,
                     rx_train,
                     inference_batch_size,
                     nnet,
@@ -246,7 +244,7 @@ impl Coach {
                                         self.num_sims,
                                         self.num_sim_threads,
                                         self.max_depth,
-                                        model_id,
+                                        iteration,
                                         self.cpuct,
                                         tx_give.clone(),
                                         tx_data.clone(),
@@ -295,12 +293,6 @@ impl Coach {
                 all_train_examples.shuffle(rng);
                 info!("Shuffled!");
 
-                info!("Saving checkpoint...");
-                tx_checkpoint
-                    .send((checkpoint.as_ref().to_path_buf(), model_id))
-                    .unwrap();
-                info!("Saved!");
-
                 info!("Converting from AOS to SOA...");
                 let num_samples = all_train_examples.len();
                 let mut batched_board_features_shape = G::get_feature_shape();
@@ -330,8 +322,7 @@ impl Coach {
                 info!("Converted!");
 
                 info!("Training...");
-                tx_train.send((samples, model_id, model_id + 1)).unwrap();
-                model_id += 1;
+                tx_train.send((samples, iteration, iteration + 1)).unwrap();
                 info!("Trained!");
 
                 play_games::<G>(self.num_arena_games, vec![&|s| 1, &|s| 0], None, false);

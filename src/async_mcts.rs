@@ -114,7 +114,6 @@ impl<G: Game> AsyncMcts<G> {
     pub fn inference_thread(
         rx: Receiver<(usize, usize, SerializedBoardFeatures)>,
         rx_send: Receiver<(usize, Sender<(SerializedPolicy, Value)>)>,
-        rx_checkpoint: Receiver<(PathBuf, usize)>,
         rx_train: Receiver<(SOATrainingSamples, usize, usize)>,
         batch_size: usize,
         nnet: impl NNet,
@@ -167,16 +166,6 @@ impl<G: Game> AsyncMcts<G> {
                         },
                         Ok((i, tx)) => {
                             tx_ret.insert(i, tx);
-                        }
-                    }
-                },
-                recv(rx_checkpoint) -> msg => {
-                    match msg {
-                        Err(_) => {
-                            break;
-                        },
-                        Ok((p, model_id)) => {
-                            nnet.save_checkpoint(p, model_id);
                         }
                     }
                 },

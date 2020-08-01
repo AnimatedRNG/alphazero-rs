@@ -30,21 +30,16 @@ pub type ArcBatchedBoardFeatures = ArcArrayD<F>;
 pub type ArcBatchedPolicy = ArcArray<f32, Ix2>;
 pub type ArcBatchedValue = ArcArray<f32, Ix1>;
 
-pub type SOATrainingSamples = (
-    ArcBatchedBoardFeatures,
-    ArcBatchedPolicy,
-    ArcBatchedValue,
-);
+pub type SOATrainingSamples = (ArcBatchedBoardFeatures, ArcBatchedPolicy, ArcBatchedValue);
 
 pub trait NNet: Send + Clone + 'static {
-    fn new() -> Self;
+    fn new<P: AsRef<Path>>(checkpoint: &P) -> Self;
 
-    //fn train(&self, examples: Vec<TrainingSample>);
     fn train(&self, examples: SOATrainingSamples, previous_model_id: usize, model_id: usize);
 
-    fn predict(&self, board: BatchedBoardFeaturesView, model_id: usize) -> (BatchedPolicy, BatchedValue);
-
-    fn save_checkpoint<P: AsRef<Path>>(&self, path: P, model_id: usize);
-
-    fn load_checkpoint<P: AsRef<Path>>(&mut self, path: &P, model_id: usize);
+    fn predict(
+        &self,
+        board: BatchedBoardFeaturesView,
+        model_id: usize,
+    ) -> (BatchedPolicy, BatchedValue);
 }
