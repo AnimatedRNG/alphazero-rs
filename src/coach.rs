@@ -1,6 +1,6 @@
 use crossbeam::{channel, scope};
 use log::{info, warn};
-use ndarray::{ArcArray, Axis, IxDyn};
+use ndarray::{ArcArray, Array, Axis, Ix1, IxDyn};
 use pbr::ProgressBar;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
@@ -10,14 +10,14 @@ use std::fs;
 use std::path::Path;
 use std::thread;
 
-use crate::arena::play_games;
+use crate::arena::{play_games, GameResult};
 use crate::async_mcts::AsyncMcts;
 use crate::game::Game;
 use crate::nnet::*;
 
 pub struct Coach {
     history: VecDeque<VecDeque<TrainingSample>>,
-    _update_threshold: f32,
+    update_threshold: f32,
     temp_threshold: usize,
     max_history_length: usize,
     max_queue_length: usize,
@@ -82,7 +82,7 @@ impl Coach {
 
         Coach {
             history,
-            _update_threshold: update_threshold,
+            update_threshold: update_threshold,
             temp_threshold,
             max_history_length,
             max_queue_length,
@@ -171,6 +171,8 @@ impl Coach {
         rng: &mut SmallRng,
     ) {
         scope(|scope| {
+            let mut model_id = 0;
+
             // set up inference thread
             let (tx_give, rx_give) = channel::bounded(0);
             let (tx_data, rx_data) = channel::unbounded();
@@ -242,7 +244,7 @@ impl Coach {
                                         self.num_sims,
                                         self.num_sim_threads,
                                         self.max_depth,
-                                        iteration,
+                                        model_id,
                                         self.cpuct,
                                         tx_give.clone(),
                                         tx_data.clone(),
@@ -320,10 +322,66 @@ impl Coach {
                 info!("Converted!");
 
                 info!("Training...");
-                tx_train.send((samples, iteration, iteration + 1)).unwrap();
+                tx_train.send((samples, model_id, model_id + 1)).unwrap();
                 info!("Trained!");
 
-                play_games::<G>(self.num_arena_games, vec![&|s| 1, &|s| 0], None, false);
+                // Old MCTS
+                let pmcts = AsyncMcts::<G>::default(
+                    self.num_sims,
+                    self.num_sim_threads,
+                    self.max_depth,
+                    model_id,
+                    self.cpuct,
+                    tx_give.clone(),
+                    tx_data.clone(),
+                );
+
+                // New (trained) MCTS
+                let nmcts = AsyncMcts::<G>::default(
+                    self.num_sims,
+                    self.num_sim_threads,
+                    self.max_depth,
+                    model_id + 1,
+                    self.cpuct,
+                    tx_give.clone(),
+                    tx_data.clone(),
+                );
+
+                let argmax = |p: Array<f32, Ix1>| {
+                    p.indexed_iter()
+                        .max_by(|(_, av), (_, bv)| {
+                            av.partial_cmp(bv).unwrap_or(std::cmp::Ordering::Equal)
+                        })
+                        .unwrap()
+                        .0 as u8
+                };
+
+                let win_counter = play_games::<G>(
+                    self.num_arena_games,
+                    vec![
+                        // temp = 0.0, episode_id = [0, 1] -- avoids conflicts with
+                        // inference thread
+                        &|s| argmax(nmcts.get_action_prob(s, 0.0, 0, &mut rng.clone())),
+                        &|s| argmax(pmcts.get_action_prob(s, 0.0, 1, &mut rng.clone())),
+                    ],
+                    None,
+                    false,
+                );
+
+                let nwins = win_counter[&GameResult::Win];
+                let pwins = win_counter[&GameResult::Loss];
+                let draws = win_counter[&GameResult::Draw];
+
+                info!("NEW/PREV WINS : {} / {}; DRAWS : {}", nwins, pwins, draws);
+
+                if pwins + nwins == 0
+                    || nwins as f32 / ((pwins + nwins) as f32) < self.update_threshold
+                {
+                    info!("REJECTING NEW MODEL");
+                } else {
+                    info!("ACCEPTING NEW MODEL");
+                    model_id += 1;
+                }
             }
 
             inference_thread.join().unwrap();
