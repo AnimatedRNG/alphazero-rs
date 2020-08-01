@@ -18,9 +18,10 @@ pub struct AsyncMcts<G: Game> {
     num_sims: usize,
     num_threads: usize,
     max_depth: usize,
+    model_id: usize,
     cpuct: i32,
     tx_give: Sender<(usize, Sender<(SerializedPolicy, f32)>)>,
-    tx_data: Sender<(usize, SerializedBoardFeatures)>,
+    tx_data: Sender<(usize, usize, SerializedBoardFeatures)>,
 }
 
 impl<G: Game> AsyncMcts<G> {
@@ -28,15 +29,17 @@ impl<G: Game> AsyncMcts<G> {
         num_sims: usize,
         num_threads: usize,
         max_depth: usize,
+        model_id: usize,
         cpuct: i32,
         tx_give: Sender<(usize, Sender<(SerializedPolicy, Value)>)>,
-        tx_data: Sender<(usize, SerializedBoardFeatures)>,
+        tx_data: Sender<(usize, usize, SerializedBoardFeatures)>,
     ) -> Self {
         AsyncMcts {
             nodes: NodeStore::<G>::new(RESERVE_SPACE),
             num_sims,
             num_threads,
             max_depth,
+            model_id,
             tx_give,
             tx_data,
             cpuct,
@@ -48,15 +51,17 @@ impl<G: Game> AsyncMcts<G> {
         num_sims: usize,
         num_threads: usize,
         max_depth: usize,
+        model_id: usize,
         cpuct: i32,
         tx_give: Sender<(usize, Sender<(SerializedPolicy, Value)>)>,
-        tx_data: Sender<(usize, SerializedBoardFeatures)>,
+        tx_data: Sender<(usize, usize, SerializedBoardFeatures)>,
     ) -> Self {
         AsyncMcts {
             nodes: NodeStore::<G>::from_root(RESERVE_SPACE, s),
             num_sims,
             num_threads,
             max_depth,
+            model_id,
             tx_give,
             tx_data,
             cpuct,
@@ -107,10 +112,10 @@ impl<G: Game> AsyncMcts<G> {
     }
 
     pub fn inference_thread(
-        rx: Receiver<(usize, SerializedBoardFeatures)>,
+        rx: Receiver<(usize, usize, SerializedBoardFeatures)>,
         rx_send: Receiver<(usize, Sender<(SerializedPolicy, Value)>)>,
-        rx_checkpoint: Receiver<PathBuf>,
-        rx_train: Receiver<SOATrainingSamples>,
+        rx_checkpoint: Receiver<(PathBuf, usize)>,
+        rx_train: Receiver<(SOATrainingSamples, usize, usize)>,
         batch_size: usize,
         nnet: impl NNet,
         feature_shape: Vec<usize>,
@@ -130,7 +135,7 @@ impl<G: Game> AsyncMcts<G> {
                         Err(_) => {
                             break;
                         },
-                        Ok((i, board)) => {
+                        Ok((i, model_id, board)) => {
                             // write batch into the buffer
                             batch_ids.push(i);
                             let batch_id = batch_ids.len();
@@ -139,7 +144,7 @@ impl<G: Game> AsyncMcts<G> {
 
                             // when we need to respond to everyone
                             if batch_ids.len() == batch_size {
-                                let (pis, vs): (BatchedPolicy, BatchedValue) = nnet.predict(inference_batch.view());
+                                let (pis, vs): (BatchedPolicy, BatchedValue) = nnet.predict(inference_batch.view(), model_id);
 
                                 for (batch_id, thread_id) in batch_ids.iter().enumerate() {
                                     let pi = pis.index_axis(Axis(0), batch_id).to_owned().into_raw_vec();
@@ -170,8 +175,8 @@ impl<G: Game> AsyncMcts<G> {
                         Err(_) => {
                             break;
                         },
-                        Ok(p) => {
-                            nnet.save_checkpoint(p);
+                        Ok((p, model_id)) => {
+                            nnet.save_checkpoint(p, model_id);
                         }
                     }
                 },
@@ -180,8 +185,8 @@ impl<G: Game> AsyncMcts<G> {
                         Err(_) => {
                             break;
                         },
-                        Ok(train_data) => {
-                            nnet.train(train_data);
+                        Ok((train_data, old_model_id, model_id)) => {
+                            nnet.train(train_data, old_model_id, model_id);
                         }
                     }
                 }
@@ -232,7 +237,7 @@ impl<G: Game> AsyncMcts<G> {
         &self,
         root_idx: usize,
         thread_id: usize,
-        nnet_tx: &Sender<(usize, SerializedBoardFeatures)>,
+        nnet_tx: &Sender<(usize, usize, SerializedBoardFeatures)>,
         nnet_rx: &Receiver<(SerializedPolicy, Value)>,
     ) {
         let mut current_head_id = root_idx;
@@ -313,7 +318,9 @@ impl<G: Game> AsyncMcts<G> {
                             // in the previous clause
                             current_head.visit();
 
-                            nnet_tx.send((thread_id, features.into_raw_vec())).unwrap();
+                            nnet_tx
+                                .send((thread_id, self.model_id, features.into_raw_vec()))
+                                .unwrap();
 
                             let (pi, v) = nnet_rx.recv().unwrap();
 

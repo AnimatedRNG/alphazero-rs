@@ -1,19 +1,19 @@
 use crossbeam::{channel, scope};
 use log::{info, warn};
+use ndarray::{ArcArray, Axis, IxDyn};
 use pbr::ProgressBar;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
-use ndarray::{ArcArray, IxDyn, Axis};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
 use std::thread;
 
+use crate::arena::play_games;
 use crate::async_mcts::AsyncMcts;
 use crate::game::Game;
 use crate::nnet::*;
-use crate::nnet::{BoardFeatures, Policy, TrainingSample};
 
 pub struct Coach {
     history: VecDeque<VecDeque<TrainingSample>>,
@@ -23,6 +23,7 @@ pub struct Coach {
     max_queue_length: usize,
     inference_batch_size: usize,
     num_episode_threads: usize,
+    num_arena_games: usize,
     num_iters: usize,
     num_eps: usize,
     num_sims: usize,
@@ -41,6 +42,7 @@ impl Coach {
         max_queue_length: usize,
         inference_batch_size: usize,
         num_episode_threads: usize,
+        num_arena_games: usize,
         num_iters: usize,
         num_eps: usize,
         num_sims: usize,
@@ -86,6 +88,7 @@ impl Coach {
             max_queue_length,
             inference_batch_size,
             num_episode_threads,
+            num_arena_games,
             num_iters,
             num_eps,
             num_sims,
@@ -168,6 +171,8 @@ impl Coach {
         rng: &mut SmallRng,
     ) {
         scope(|scope| {
+            let mut model_id = 0;
+
             // set up inference thread
             let (tx_give, rx_give) = channel::bounded(0);
             let (tx_data, rx_data) = channel::unbounded();
@@ -241,6 +246,7 @@ impl Coach {
                                         self.num_sims,
                                         self.num_sim_threads,
                                         self.max_depth,
+                                        model_id,
                                         self.cpuct,
                                         tx_give.clone(),
                                         tx_data.clone(),
@@ -291,7 +297,7 @@ impl Coach {
 
                 info!("Saving checkpoint...");
                 tx_checkpoint
-                    .send(checkpoint.as_ref().to_path_buf())
+                    .send((checkpoint.as_ref().to_path_buf(), model_id))
                     .unwrap();
                 info!("Saved!");
 
@@ -311,17 +317,24 @@ impl Coach {
 
                 // convert AOS to SOA
                 for i in 0..num_samples {
-                    samples.0.index_axis_mut(Axis(0), i).assign(
-                        &all_train_examples[i].board);
-                    samples.1.index_axis_mut(Axis(0), i).assign(
-                        &all_train_examples[i].pi);
+                    samples
+                        .0
+                        .index_axis_mut(Axis(0), i)
+                        .assign(&all_train_examples[i].board);
+                    samples
+                        .1
+                        .index_axis_mut(Axis(0), i)
+                        .assign(&all_train_examples[i].pi);
                     samples.2[i] = all_train_examples[i].v;
                 }
                 info!("Converted!");
 
                 info!("Training...");
-                tx_train.send(samples).unwrap();
-                info!("Trained!")
+                tx_train.send((samples, model_id, model_id + 1)).unwrap();
+                model_id += 1;
+                info!("Trained!");
+
+                play_games::<G>(self.num_arena_games, vec![&|s| 1, &|s| 0], None, false);
             }
 
             inference_thread.join().unwrap();
