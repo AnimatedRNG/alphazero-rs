@@ -111,14 +111,16 @@ impl<G: Game> AsyncMcts<G> {
         }
     }
 
-    pub fn inference_thread(
+    pub fn inference_thread<N: NNet>(
+        checkpoint_dir: PathBuf,
         rx: Receiver<(usize, usize, SerializedBoardFeatures)>,
         rx_send: Receiver<(usize, Sender<(SerializedPolicy, Value)>)>,
         rx_train: Receiver<(SOATrainingSamples, usize, usize)>,
         batch_size: usize,
-        nnet: impl NNet,
         feature_shape: Vec<usize>,
     ) {
+        let mut nnet: N = N::new(&checkpoint_dir);
+
         let mut tx_ret: HashMap<usize, Sender<(SerializedPolicy, Value)>> = HashMap::new();
 
         let mut board_shape = feature_shape.clone();

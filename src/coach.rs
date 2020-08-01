@@ -163,7 +163,7 @@ impl Coach {
             .unwrap_or_else(|_| panic!("unable to write iteration {}", iteration));
     }
 
-    pub fn learn<G: Game, N: NNet, P: AsRef<Path>>(
+    pub fn learn<G: Game, N: NNet, P: AsRef<Path> + Send>(
         &mut self,
         checkpoint: P,
         skip_first_play: bool,
@@ -171,8 +171,6 @@ impl Coach {
         rng: &mut SmallRng,
     ) {
         scope(|scope| {
-            let mut model_id = 0;
-
             // set up inference thread
             let (tx_give, rx_give) = channel::bounded(0);
             let (tx_data, rx_data) = channel::unbounded();
@@ -180,18 +178,18 @@ impl Coach {
 
             let feature_shape = G::get_feature_shape();
 
-            let nnet = N::new(&checkpoint);
-
             let inference_batch_size = self.inference_batch_size;
+
+            let checkpoint_pbuf = checkpoint.as_ref().to_path_buf();
 
             // persistent inference thread
             let inference_thread = scope.spawn(move |_| {
-                AsyncMcts::<G>::inference_thread(
+                AsyncMcts::<G>::inference_thread::<N>(
+                    checkpoint_pbuf,
                     rx_data,
                     rx_give,
                     rx_train,
                     inference_batch_size,
-                    nnet,
                     feature_shape,
                 )
             });
