@@ -30,7 +30,7 @@ pub type ArcBatchedBoardFeatures = ArcArrayD<F>;
 pub type ArcBatchedPolicy = ArcArray<f32, Ix2>;
 pub type ArcBatchedValue = ArcArray<f32, Ix1>;
 
-pub type SOATrainingSamples<'a> = (
+pub type SOATrainingSamples = (
     ArcBatchedBoardFeatures,
     ArcBatchedPolicy,
     ArcBatchedValue,

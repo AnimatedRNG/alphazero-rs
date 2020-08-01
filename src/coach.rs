@@ -4,6 +4,7 @@ use pbr::ProgressBar;
 use rand::rngs::SmallRng;
 use rand::seq::SliceRandom;
 use rayon::prelude::*;
+use ndarray::{ArcArray, IxDyn, Axis};
 use std::collections::VecDeque;
 use std::fs;
 use std::path::Path;
@@ -11,7 +12,7 @@ use std::thread;
 
 use crate::async_mcts::AsyncMcts;
 use crate::game::Game;
-use crate::nnet::NNet;
+use crate::nnet::*;
 use crate::nnet::{BoardFeatures, Policy, TrainingSample};
 
 pub struct Coach {
@@ -171,6 +172,7 @@ impl Coach {
             let (tx_give, rx_give) = channel::bounded(0);
             let (tx_data, rx_data) = channel::unbounded();
             let (tx_checkpoint, rx_checkpoint) = channel::bounded(0);
+            let (tx_train, rx_train) = channel::bounded(0);
 
             let feature_shape = G::get_feature_shape();
 
@@ -184,6 +186,7 @@ impl Coach {
                     rx_data,
                     rx_give,
                     rx_checkpoint,
+                    rx_train,
                     inference_batch_size,
                     nnet,
                     feature_shape,
@@ -286,9 +289,39 @@ impl Coach {
                 all_train_examples.shuffle(rng);
                 info!("Shuffled!");
 
+                info!("Saving checkpoint...");
                 tx_checkpoint
                     .send(checkpoint.as_ref().to_path_buf())
                     .unwrap();
+                info!("Saved!");
+
+                info!("Converting from AOS to SOA...");
+                let num_samples = all_train_examples.len();
+                let mut batched_board_features_shape = G::get_feature_shape();
+                batched_board_features_shape.insert(0, num_samples);
+
+                assert!(num_samples > 0);
+
+                let policy_size = all_train_examples[0].pi.shape()[0];
+                let mut samples: SOATrainingSamples = (
+                    ArcArray::zeros(IxDyn(&batched_board_features_shape)),
+                    ArcArray::zeros([num_samples, policy_size]),
+                    ArcArray::zeros([num_samples]),
+                );
+
+                // convert AOS to SOA
+                for i in 0..num_samples {
+                    samples.0.index_axis_mut(Axis(0), i).assign(
+                        &all_train_examples[i].board);
+                    samples.1.index_axis_mut(Axis(0), i).assign(
+                        &all_train_examples[i].pi);
+                    samples.2[i] = all_train_examples[i].v;
+                }
+                info!("Converted!");
+
+                info!("Training...");
+                tx_train.send(samples).unwrap();
+                info!("Trained!")
             }
 
             inference_thread.join().unwrap();

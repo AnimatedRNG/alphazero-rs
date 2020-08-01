@@ -110,6 +110,7 @@ impl<G: Game> AsyncMcts<G> {
         rx: Receiver<(usize, SerializedBoardFeatures)>,
         rx_send: Receiver<(usize, Sender<(SerializedPolicy, Value)>)>,
         rx_checkpoint: Receiver<PathBuf>,
+        rx_train: Receiver<SOATrainingSamples>,
         batch_size: usize,
         nnet: impl NNet,
         feature_shape: Vec<usize>,
@@ -171,6 +172,16 @@ impl<G: Game> AsyncMcts<G> {
                         },
                         Ok(p) => {
                             nnet.save_checkpoint(p);
+                        }
+                    }
+                },
+                recv(rx_train) -> msg => {
+                    match msg {
+                        Err(_) => {
+                            break;
+                        },
+                        Ok(train_data) => {
+                            nnet.train(train_data);
                         }
                     }
                 }
