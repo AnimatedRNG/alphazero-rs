@@ -30,3 +30,4 @@ path = "examples/connect_four.rs"
 [dev_dependencies]
 numpy = "0.11.0"
 pyo3 = "0.11.1"
+pretty_env_logger = "0.3"
