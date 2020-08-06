@@ -33,22 +33,18 @@ impl Clone for ConnectFourGame {
 
 impl fmt::Display for ConnectFourGame {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        let mut rows: Vec<_> = Vec::new();
-        for i in 0..DEFAULT_HEIGHT {
-            let mut cols: Vec<_> = Vec::new();
-            for j in 0..DEFAULT_WIDTH {
-                cols.push(match self.s[i][j] {
+        for row in 0..DEFAULT_HEIGHT {
+            for col in 0..DEFAULT_WIDTH {
+                f.write_str(match self.s[row][col] {
                     0 => "_",
                     1 => "1",
                     -1 => "2",
                     _ => panic!("invalid value in board"),
-                });
+                })?;
             }
-            rows.push(cols.join(" "));
+            f.write_str("\n")?;
         }
-
-        let text: String = rows.join("\n");
-        write!(f, "{}", text)
+        Ok(())
     }
 }
 
