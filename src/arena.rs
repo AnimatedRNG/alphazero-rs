@@ -11,8 +11,8 @@ pub fn play_game<G: Game>(
 ) -> i8 {
     assert!(player_actions.len() == 2);
 
-    let cur_player = 1;
-    let board: G = board.clone().unwrap_or_else(G::get_init_board);
+    let mut cur_player = 1;
+    let mut board: G = board.clone().unwrap_or_else(G::get_init_board);
     let mut iteration = 0;
 
     while board.get_game_ended(cur_player) == 0.0 {
@@ -33,6 +33,10 @@ pub fn play_game<G: Game>(
             error!("valids = {}", valids);
             assert!(valids[action as usize] > 0);
         }
+
+        let (new_board, new_cur_player) = board.get_next_state(cur_player, action);
+        board = new_board;
+        cur_player = new_cur_player;
     }
 
     if verbose {
