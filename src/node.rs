@@ -340,63 +340,33 @@ impl<G: Game> NodeStore<G> {
         debug_assert!(unlocked);
     }
 
-    fn sort_children(&self, buf: &mut Vec<(usize, f32)>, node: &Node<G>, cpuct: i32) {
-        buf.clear();
-
-        let parent_n = node.get_n();
-        buf.extend(node.children.iter().map(|&child_idx| {
-            let child = self.get(child_idx).unwrap();
-            let u = child.compute_q()
-                + (cpuct as f32)
-                    * node.mu.p.as_ref().unwrap()[child.a as usize]
-                    * f32::sqrt(parent_n as f32 + EPS)
-                    / (1 + child.get_n()) as f32;
-            (child_idx, u)
-        }));
-
-        buf.sort_by(|(_, u1), (_, u2)| u2.partial_cmp(u1).unwrap_or(std::cmp::Ordering::Equal));
-    }
-
-    pub fn best_child(&self, idx: usize, cpuct: i32, _lock_leaf: bool) -> (usize, NodeState) {
+    pub fn best_child(&self, idx: usize, cpuct: i32, _filter: bool) -> usize {
         let node = self.get(idx).unwrap();
 
-        let mut buf: Vec<(usize, f32)> = Vec::with_capacity(node.children.len());
-
-        // keep looping until we get something!
-        loop {
-            // we could do this loop by checking if all the nodes
-            // are valid first and then picking the best one. that
-            // approach avoids the sorting algorithm, but it means that
-            // we have to call NodeStore::state on _every_ child, which
-            // is really not ideal given that NodeStore::state uses
-            // atomics with sequential consistency.
-
-            // another approach is to create a min binary heap and then
-            // keep removing the top node as we go through the array so that
-            // we only keep around the best k nodes at a time. if the binary
-            // heap is stack-allocated, then there's no heap allocation.
-            // the downside is that if all k elements are locked then there's
-            // not much you can do other than keep looping. also we might
-            // have games that have really large branching factors, in which
-            // case stack allocation doesn't really help us
-
-            self.sort_children(&mut buf, &node, cpuct);
-
-            for (child_idx, _) in &buf {
-                let child_state = self.state(*child_idx);
-                // we know that all children must exist at least
-                if child_state != Some(NodeState::Locked) {
-                    if child_state == Some(NodeState::PlaceHolder) {
-                        // try locking this node, but if it doesn't work,
-                        // then just keep going
-                        if !self.lock(*child_idx) {
-                            continue;
-                        }
-                    }
-                    return (*child_idx, child_state.unwrap());
+        let parent_n = node.get_n();
+        let (best_child_idx, _) = node
+            .children
+            .iter()
+            .map(|&child_idx| {
+                let child = self.get(child_idx).unwrap();
+                let u = child.compute_q()
+                    + (cpuct as f32)
+                        * node.mu.p.as_ref().unwrap()[child.a as usize]
+                        * f32::sqrt(parent_n as f32 + EPS)
+                        / (1 + child.get_n()) as f32;
+                (child_idx, u)
+            })
+            .filter(|(child_idx, _)| {
+                if _filter {
+                    self.state(*child_idx) != Some(NodeState::Locked)
+                } else {
+                    true
                 }
-            }
-        }
+            })
+            .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap();
+
+        best_child_idx
     }
 
     pub fn len(&self) -> usize {

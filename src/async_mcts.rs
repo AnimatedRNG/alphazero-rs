@@ -261,21 +261,30 @@ impl<G: Game> AsyncMcts<G> {
 
                     current_head.visit();
 
-                    let (best_child_id, best_child_state) =
-                        self.nodes.best_child(current_head_id, self.cpuct, true);
+                    let mut first_iteration = true;
+                    loop {
+                        let best_child_id =
+                            self.nodes.best_child(current_head_id, self.cpuct, !first_iteration);
+                        first_iteration = false;
 
-                    // if we descended onto a leaf, keep track of our
-                    // parent id for just a sec
-                    if best_child_state == NodeState::Locked {
-                        p_s_id = current_head_id;
+                        match self.nodes.state(best_child_id).unwrap() {
+                            NodeState::PlaceHolder => {
+                                if self.nodes.lock(best_child_id) {
+                                    // if we descended onto a leaf, keep track of our
+                                    // parent id for just a sec
+                                    p_s_id = current_head_id;
+                                    break;
+                                }
+                            },
+                            NodeState::Exists(best_child_state) => {
+                                node_path.push(current_head_id);
+                                current_head_id = best_child_id;
+                                current_head_state = NodeState::Exists(best_child_state);
+                                depth += 1;
+                            },
+                            _ => continue,
+                        };
                     }
-
-                    debug_assert!(best_child_state != NodeState::PlaceHolder);
-
-                    node_path.push(current_head_id);
-                    current_head_id = best_child_id;
-                    current_head_state = best_child_state;
-                    depth += 1;
                 }
                 NodeState::Locked => {
                     let node_p = self.nodes.get(p_s_id).unwrap();
