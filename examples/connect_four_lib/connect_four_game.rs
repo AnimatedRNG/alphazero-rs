@@ -96,7 +96,7 @@ impl Game for ConnectFourGame {
         log::debug!("C4 move: {} {}", player, action);
         debug_assert!(height < &mut DEFAULT_HEIGHT);
         *height += 1;
-        next_state.s[*height][action] = player;
+        next_state.s[DEFAULT_HEIGHT - *height][action] = player;
 
         (next_state, -player)
     }
