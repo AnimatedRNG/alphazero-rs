@@ -15,20 +15,11 @@ const DEFAULT_WIDTH: usize = 7;
 const DEFAULT_WIN_LENGTH: usize = 4;
 const DRAW_EPS: f32 = 1e-4;
 
+#[derive(Clone, Debug)]
 pub struct ConnectFourGame {
     s: [[i8; DEFAULT_WIDTH]; DEFAULT_HEIGHT],
     heights: [usize; DEFAULT_WIDTH],
     me: i8,
-}
-
-impl Clone for ConnectFourGame {
-    fn clone(&self) -> ConnectFourGame {
-        ConnectFourGame {
-            s: self.s,
-            heights: self.heights,
-            me: self.me,
-        }
-    }
 }
 
 impl fmt::Display for ConnectFourGame {
@@ -156,8 +147,8 @@ impl Game for ConnectFourGame {
         }
 
         // diagonal +1/+1
-        for row in 0..DEFAULT_HEIGHT - DEFAULT_WIN_LENGTH {
-            for col in 0..DEFAULT_WIDTH - DEFAULT_WIN_LENGTH {
+        for row in 0..=DEFAULT_HEIGHT - DEFAULT_WIN_LENGTH {
+            for col in 0..=DEFAULT_WIDTH - DEFAULT_WIN_LENGTH {
                 if self.s[row][col] != 0
                     && [self.s[row][col]; DEFAULT_WIN_LENGTH]
                         == [
@@ -177,15 +168,15 @@ impl Game for ConnectFourGame {
         }
 
         // diagonal +1/-1
-        for row in 0..DEFAULT_HEIGHT {
-            for col in DEFAULT_WIN_LENGTH..DEFAULT_WIDTH {
+        for row in 0..=DEFAULT_HEIGHT - DEFAULT_WIN_LENGTH {
+            for col in DEFAULT_WIN_LENGTH - 1..DEFAULT_WIDTH {
                 if self.s[row][col] != 0
                     && [self.s[row][col]; DEFAULT_WIN_LENGTH]
                         == [
                             self.s[row][col],
-                            self.s[row][col - 1],
-                            self.s[row][col - 2],
-                            self.s[row][col - 3],
+                            self.s[row + 1][col - 1],
+                            self.s[row + 2][col - 2],
+                            self.s[row + 3][col - 3],
                         ]
                 {
                     return if player == self.s[row][col] {
@@ -243,5 +234,32 @@ impl Game for ConnectFourGame {
         });
 
         f
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_win_diagonal() {
+        let board = ConnectFourGame::empty();
+        let player = 1;
+        let (board, player) = board.get_next_state(player, 0);
+
+        let (board, player) = board.get_next_state(player, 1);
+        let (board, player) = board.get_next_state(player, 1);
+
+        let (board, player) = board.get_next_state(player, 2);
+        let (board, player) = board.get_next_state(player, 0);
+        let (board, player) = board.get_next_state(player, 2);
+        let (board, player) = board.get_next_state(player, 2);
+
+        let (board, player) = board.get_next_state(player, 3);
+        let (board, player) = board.get_next_state(player, 3);
+        let (board, player) = board.get_next_state(player, 3);
+        let (board, player) = board.get_next_state(player, 3);
+
+        assert_eq!(board.get_game_ended(1), 1f32);
     }
 }
