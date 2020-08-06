@@ -22,3 +22,11 @@ permutohedron = "0.2.4"
 pbr = "1.0.3"
 serde = { version = "1.0.114", features = ["derive"] }
 bincode = "1.3.1"
+
+[[example]]
+name = "connect_four"
+path = "examples/connect_four.rs"
+
+[dev_dependencies]
+numpy = "0.11.0"
+pyo3 = "0.11.1"
