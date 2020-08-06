@@ -1,6 +1,6 @@
 use crossbeam::{channel, scope, select, Receiver, Sender};
 use log::warn;
-use ndarray::{Array, Axis, Ix1, Zip};
+use ndarray::{Array, Axis, Zip};
 use rand::rngs::SmallRng;
 use rand::seq::IteratorRandom;
 use std::collections::HashMap;
@@ -12,7 +12,7 @@ use crate::nnet::*;
 use crate::node::{NodeState, NodeStore};
 
 pub struct AsyncMcts<G: Game> {
-    reserve_space: usize,
+    _reserve_space: usize,
     nodes: NodeStore<G>,
     num_sims: usize,
     num_threads: usize,
@@ -35,7 +35,7 @@ impl<G: Game> AsyncMcts<G> {
         tx_data: Sender<(usize, usize, ArcBoardFeatures)>,
     ) -> Self {
         AsyncMcts {
-            reserve_space,
+            _reserve_space: reserve_space,
             nodes: NodeStore::<G>::new(reserve_space),
             num_sims,
             num_threads,
@@ -59,7 +59,7 @@ impl<G: Game> AsyncMcts<G> {
         tx_data: Sender<(usize, usize, ArcBoardFeatures)>,
     ) -> Self {
         AsyncMcts {
-            reserve_space,
+            _reserve_space: reserve_space,
             nodes: NodeStore::<G>::from_root(reserve_space, s),
             num_sims,
             num_threads,
