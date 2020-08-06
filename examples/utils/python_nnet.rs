@@ -2,8 +2,7 @@ use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
 
 use alphazero_rs::nnet::*;
-use ndarray::prelude::*;
-use numpy::{IntoPyArray, PyArray};
+use numpy::{IntoPyArray, PyArray1, PyArray2};
 use pyo3::prelude::*;
 use pyo3::types::PyTuple;
 
@@ -17,7 +16,8 @@ pub struct PythonNNet<M> {
     phantom: PhantomData<M>,
     module: Py<PyModule>,
     model: PyObject,
-    checkpoint: PathBuf
+    last_model: usize,
+    checkpoint: PathBuf,
 }
 
 impl<M> NNet for PythonNNet<M>
@@ -37,7 +37,8 @@ where
             phantom: PhantomData,
             module: module.into(),
             model: model,
-            checkpoint: checkpoint.as_ref().to_path_buf()
+            last_model: 0,
+            checkpoint: checkpoint.as_ref().to_path_buf(),
         }
     }
 
@@ -53,9 +54,35 @@ where
         let examples = PyTuple::new(py, &examples);
 
         let module = self.module.as_ref(py);
+
+        let checkpoint_str = self
+            .checkpoint
+            .clone()
+            .into_os_string()
+            .into_string()
+            .unwrap();
+
+        let model = if self.last_model != previous_model_id {
+            module
+                .call(
+                    "load_model",
+                    (self.model.as_ref(py), model_id, checkpoint_str.clone()),
+                    None,
+                )
+                .unwrap()
+        } else {
+            self.model.as_ref(py)
+        };
+
         let new_model = module
             .call("train_model", (self.model.as_ref(py), examples), None)
             .unwrap();
+        module
+            .call("save_model", (model, model_id, checkpoint_str), None)
+            .unwrap();
+
+        self.model = new_model.to_object(py);
+        self.last_model = model_id;
     }
 
     fn predict(
@@ -63,6 +90,43 @@ where
         board: BatchedBoardFeaturesView,
         model_id: usize,
     ) -> (BatchedPolicy, BatchedValue) {
-        (BatchedPolicy::zeros([3, 3]), BatchedValue::zeros([3]))
+        let gil = Python::acquire_gil();
+        let py = gil.python();
+
+        let board: PyObject = board.to_owned().into_pyarray(py).into();
+
+        let checkpoint_str = self
+            .checkpoint
+            .clone()
+            .into_os_string()
+            .into_string()
+            .unwrap();
+
+        let module = self.module.as_ref(py);
+        let model = if self.last_model != model_id {
+            module
+                .call(
+                    "load_model",
+                    (self.model.as_ref(py), model_id, checkpoint_str),
+                    None,
+                )
+                .unwrap()
+        } else {
+            self.model.as_ref(py)
+        };
+
+        let predictions: &PyAny = module.call("predict_model", (model, board), None).unwrap();
+        let predictions = predictions.downcast::<PyTuple>().unwrap();
+        let (policy, value): (&PyArray2<f32>, &PyArray1<f32>) = (
+            predictions.get_item(0).extract().unwrap(),
+            predictions.get_item(1).extract().unwrap(),
+        );
+
+        let (policy, value) = (policy.readonly(), value.readonly());
+
+        (
+            policy.as_array().into_owned(),
+            value.as_array().into_owned(),
+        )
     }
 }
