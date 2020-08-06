@@ -112,9 +112,8 @@ impl Game for ConnectFourGame {
 
     fn get_valid_moves(&self, _: i8) -> Array<u8, Ix1> {
         (0..DEFAULT_WIDTH as u8)
-            .map(|j| (j, self.heights[usize::from(j)]))
-            .filter(|(_, k)| k < &DEFAULT_HEIGHT)
-            .map(|(j, _)| j)
+            .map(|col| (col, self.heights[usize::from(col)]))
+            .map(|(_, height)| (height < DEFAULT_HEIGHT) as u8)
             .collect()
     }
 
