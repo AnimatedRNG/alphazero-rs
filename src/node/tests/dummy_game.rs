@@ -62,8 +62,8 @@ impl Game for DummyGame {
         Array::zeros(1)
     }
 
-    fn get_game_ended(&self, _player: i8) -> i8 {
-        0
+    fn get_game_ended(&self, _player: i8) -> f32 {
+        0.0
     }
 
     fn get_canonical_form(&self, _player: i8) -> DummyGame {

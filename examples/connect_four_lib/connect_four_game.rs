@@ -13,6 +13,7 @@ use ndarray::{s, Array, ArrayD, Ix1, IxDyn};
 const DEFAULT_HEIGHT: usize = 6;
 const DEFAULT_WIDTH: usize = 7;
 const DEFAULT_WIN_LENGTH: usize = 4;
+const DRAW_EPS: f32 = 1e-4;
 
 pub struct ConnectFourGame {
     s: [[i8; DEFAULT_HEIGHT]; DEFAULT_WIDTH],
@@ -120,7 +121,7 @@ impl Game for ConnectFourGame {
             .collect()
     }
 
-    fn get_game_ended(&self, player: i8) -> i8 {
+    fn get_game_ended(&self, player: i8) -> f32 {
         let mut running_sum: usize = 0;
         let check = |i: usize, j: usize, running_sum: &mut usize| {
             *running_sum = if self.s[i][j] == player {
@@ -141,7 +142,7 @@ impl Game for ConnectFourGame {
             running_sum = 0;
             for j in 0..DEFAULT_WIDTH {
                 if check(i, j, &mut running_sum).is_some() {
-                    return player;
+                    return player as f32;
                 }
             }
         }
@@ -150,7 +151,7 @@ impl Game for ConnectFourGame {
         for j in 0..DEFAULT_WIDTH {
             for i in 0..DEFAULT_HEIGHT {
                 if check(i, j, &mut running_sum).is_some() {
-                    return player;
+                    return player as f32;
                 }
             }
         }
@@ -163,7 +164,7 @@ impl Game for ConnectFourGame {
                     && j < DEFAULT_WIDTH
                     && check(i, j, &mut running_sum).is_some()
                 {
-                    return player;
+                    return player as f32;
                 }
             }
         }
@@ -176,12 +177,16 @@ impl Game for ConnectFourGame {
                     && j < DEFAULT_WIDTH
                     && check(i, j, &mut running_sum).is_some()
                 {
-                    return player;
+                    return player as f32;
                 }
             }
         }
 
-        0
+        if self.heights.iter().filter(|&h| h < &DEFAULT_HEIGHT).count() == 0 {
+            DRAW_EPS
+        } else {
+            0.0
+        }
     }
 
     fn get_canonical_form(&self, _player: i8) -> ConnectFourGame {

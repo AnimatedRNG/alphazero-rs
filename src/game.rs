@@ -16,7 +16,7 @@ pub trait Game: Display + Sized + Send + Clone + Hash + Eq {
 
     fn get_valid_moves(&self, player: i8) -> Array<u8, Ix1>;
 
-    fn get_game_ended(&self, player: i8) -> i8;
+    fn get_game_ended(&self, player: i8) -> f32;
 
     fn get_canonical_form(&self, player: i8) -> Self;
 

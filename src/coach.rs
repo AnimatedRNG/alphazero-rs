@@ -143,7 +143,7 @@ impl Coach {
 
             let r = board.get_game_ended(cur_player);
 
-            if r != 0 {
+            if r != 0.0 {
                 return train_examples
                     .into_iter()
                     .map(|(b_f, player, p)| TrainingSample {

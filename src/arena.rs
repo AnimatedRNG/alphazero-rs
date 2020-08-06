@@ -15,7 +15,7 @@ pub fn play_game<G: Game>(
     let board: G = board.clone().unwrap_or_else(G::get_init_board);
     let mut iteration = 0;
 
-    while board.get_game_ended(cur_player) == 0 {
+    while board.get_game_ended(cur_player) == 0.0 {
         iteration += 1;
 
         if verbose {
@@ -43,7 +43,8 @@ pub fn play_game<G: Game>(
         )
     }
 
-    cur_player * board.get_game_ended(cur_player)
+    // if it's close to 0, just round it to a draw
+    cur_player * f32::round(board.get_game_ended(cur_player)) as i8
 }
 
 #[derive(Hash, PartialEq, Eq, Clone, Copy)]

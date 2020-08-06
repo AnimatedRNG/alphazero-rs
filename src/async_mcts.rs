@@ -264,7 +264,8 @@ impl<G: Game> AsyncMcts<G> {
                     let mut first_iteration = true;
                     loop {
                         let best_child_id =
-                            self.nodes.best_child(current_head_id, self.cpuct, !first_iteration);
+                            self.nodes
+                                .best_child(current_head_id, self.cpuct, !first_iteration);
                         first_iteration = false;
 
                         match self.nodes.state(best_child_id).unwrap() {
@@ -275,13 +276,13 @@ impl<G: Game> AsyncMcts<G> {
                                     p_s_id = current_head_id;
                                     break;
                                 }
-                            },
+                            }
                             NodeState::Exists(best_child_state) => {
                                 node_path.push(current_head_id);
                                 current_head_id = best_child_id;
                                 current_head_state = NodeState::Exists(best_child_state);
                                 depth += 1;
-                            },
+                            }
                             _ => continue,
                         };
                     }

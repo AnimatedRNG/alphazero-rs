@@ -291,9 +291,9 @@ impl<G: Game> NodeStore<G> {
                     let mu: &mut NodeMutableState<G> = &mut old_node.mu;
                     mu.s = Some(s.clone());
                     let game_ended = s.get_game_ended(1);
-                    old_node.e.store((-game_ended) as f32);
+                    old_node.e.store(-game_ended);
 
-                    if game_ended == 0 {
+                    if game_ended == 0.0 {
                         let valids = s.get_valid_moves(1);
                         let valid_actions: Vec<_> = valids
                             .indexed_iter()
