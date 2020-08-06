@@ -1,6 +1,6 @@
 use crossbeam::{channel, scope, select, Receiver, Sender};
 use log::warn;
-use ndarray::{Array, Axis, Zip};
+use ndarray::{Array, Axis, Ix1, Zip};
 use rand::rngs::SmallRng;
 use rand::seq::IteratorRandom;
 use std::collections::HashMap;
@@ -19,8 +19,8 @@ pub struct AsyncMcts<G: Game> {
     max_depth: usize,
     model_id: usize,
     cpuct: i32,
-    tx_give: Sender<(usize, Sender<(SerializedPolicy, f32)>)>,
-    tx_data: Sender<(usize, usize, SerializedBoardFeatures)>,
+    tx_give: Sender<(usize, Sender<(ArcPolicy, f32)>)>,
+    tx_data: Sender<(usize, usize, ArcBoardFeatures)>,
 }
 
 impl<G: Game> AsyncMcts<G> {
@@ -31,8 +31,8 @@ impl<G: Game> AsyncMcts<G> {
         max_depth: usize,
         model_id: usize,
         cpuct: i32,
-        tx_give: Sender<(usize, Sender<(SerializedPolicy, Value)>)>,
-        tx_data: Sender<(usize, usize, SerializedBoardFeatures)>,
+        tx_give: Sender<(usize, Sender<(ArcPolicy, Value)>)>,
+        tx_data: Sender<(usize, usize, ArcBoardFeatures)>,
     ) -> Self {
         AsyncMcts {
             reserve_space,
@@ -55,8 +55,8 @@ impl<G: Game> AsyncMcts<G> {
         max_depth: usize,
         model_id: usize,
         cpuct: i32,
-        tx_give: Sender<(usize, Sender<(SerializedPolicy, Value)>)>,
-        tx_data: Sender<(usize, usize, SerializedBoardFeatures)>,
+        tx_give: Sender<(usize, Sender<(ArcPolicy, Value)>)>,
+        tx_data: Sender<(usize, usize, ArcBoardFeatures)>,
     ) -> Self {
         AsyncMcts {
             reserve_space,
@@ -116,15 +116,15 @@ impl<G: Game> AsyncMcts<G> {
 
     pub fn inference_thread<N: NNet>(
         checkpoint_dir: PathBuf,
-        rx: Receiver<(usize, usize, SerializedBoardFeatures)>,
-        rx_send: Receiver<(usize, Sender<(SerializedPolicy, Value)>)>,
+        rx: Receiver<(usize, usize, ArcBoardFeatures)>,
+        rx_send: Receiver<(usize, Sender<(ArcPolicy, Value)>)>,
         rx_train: Receiver<(SOATrainingSamples, usize, usize)>,
         batch_size: usize,
         feature_shape: Vec<usize>,
     ) {
         let mut nnet: N = N::new(&checkpoint_dir);
 
-        let mut tx_ret: HashMap<usize, Sender<(SerializedPolicy, Value)>> = HashMap::new();
+        let mut tx_ret: HashMap<usize, Sender<(ArcPolicy, Value)>> = HashMap::new();
 
         let mut board_shape = feature_shape.clone();
         board_shape.insert(0, batch_size);
@@ -144,14 +144,14 @@ impl<G: Game> AsyncMcts<G> {
                             batch_ids.push(i);
                             let batch_id = batch_ids.len();
                             let mut batch_subview = inference_batch.index_axis_mut(Axis(0), batch_id);
-                            batch_subview.assign(&Array::from_shape_vec(feature_shape.clone(), board).unwrap().view());
+                            batch_subview.assign(&board.view());
 
                             // when we need to respond to everyone
                             if batch_ids.len() == batch_size {
                                 let (pis, vs): (BatchedPolicy, BatchedValue) = nnet.predict(inference_batch.view(), model_id);
 
                                 for (batch_id, thread_id) in batch_ids.iter().enumerate() {
-                                    let pi = pis.index_axis(Axis(0), batch_id).to_owned().into_raw_vec();
+                                    let pi = pis.index_axis(Axis(0), batch_id).into_owned().into_shared();
                                     let v = vs[batch_id];
                                     tx_ret.get(&thread_id).unwrap().send((pi, v)).unwrap();
                                 }
@@ -189,15 +189,6 @@ impl<G: Game> AsyncMcts<G> {
     }
 
     pub fn search(&self, root_idx: usize, episode_id: usize) {
-        //let (tx_give, rx_give) = channel::bounded(0);
-        //let (tx_data, rx_data) = channel::unbounded();
-
-        //let feature_shape = G::get_feature_shape();
-
-        //let inference_thread = thread::spawn(move || {
-        //    AsyncMcts::<G>::inference_thread(rx_data, rx_give, nnet, feature_shape)
-        //});
-
         assert!(self.num_sims % self.num_threads == 0);
 
         let sim_id = AtomicUsize::new(0);
@@ -223,16 +214,14 @@ impl<G: Game> AsyncMcts<G> {
             });
         })
         .unwrap();
-
-        //inference_thread.join().unwrap()
     }
 
     fn search_iteration(
         &self,
         root_idx: usize,
         thread_id: usize,
-        nnet_tx: &Sender<(usize, usize, SerializedBoardFeatures)>,
-        nnet_rx: &Receiver<(SerializedPolicy, Value)>,
+        nnet_tx: &Sender<(usize, usize, ArcBoardFeatures)>,
+        nnet_rx: &Receiver<(ArcPolicy, Value)>,
     ) {
         let mut current_head_id = root_idx;
         let mut current_head_state = NodeState::Exists(true);
@@ -320,12 +309,12 @@ impl<G: Game> AsyncMcts<G> {
                             current_head.visit();
 
                             nnet_tx
-                                .send((thread_id, self.model_id, features.into_raw_vec()))
+                                .send((thread_id, self.model_id, features.into_shared()))
                                 .unwrap();
 
                             let (pi, v) = nnet_rx.recv().unwrap();
 
-                            let mut pi: Policy = pi.into();
+                            let mut pi: Policy = pi.into_owned();
 
                             let valids = current_head.mu.v.as_ref().unwrap();
 

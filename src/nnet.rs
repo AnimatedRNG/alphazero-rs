@@ -10,12 +10,12 @@ pub type BoardFeatures = ArrayD<F>;
 pub type BoardFeaturesView<'a> = ArrayViewD<'a, F>;
 pub type BatchedBoardFeatures = ArrayD<F>;
 pub type BatchedBoardFeaturesView<'a> = ArrayViewD<'a, F>;
-pub type SerializedBoardFeatures = Vec<F>;
+pub type ArcBoardFeatures = ArcArrayD<F>;
 pub type BatchedPolicy = Array<f32, Ix2>;
 pub type BatchedPolicyView<'a> = ArrayView<'a, f32, Ix2>;
 pub type Policy = Array<f32, Ix1>;
 pub type PolicyView<'a> = ArrayView<'a, f32, Ix1>;
-pub type SerializedPolicy = Vec<f32>;
+pub type ArcPolicy = ArcArray<f32, Ix1>;
 pub type BatchedValue = Array<f32, Ix1>;
 pub type Value = f32;
 
