@@ -16,7 +16,7 @@ const DEFAULT_WIN_LENGTH: usize = 4;
 const DRAW_EPS: f32 = 1e-4;
 
 pub struct ConnectFourGame {
-    s: [[i8; DEFAULT_HEIGHT]; DEFAULT_WIDTH],
+    s: [[i8; DEFAULT_WIDTH]; DEFAULT_HEIGHT],
     heights: [usize; DEFAULT_WIDTH],
     me: i8,
 }
@@ -106,11 +106,12 @@ impl Game for ConnectFourGame {
         let action = action as usize;
 
         let height = &mut next_state.heights[action];
+        log::debug!("C4 move: {} {}", player, action);
         debug_assert!(height < &mut DEFAULT_HEIGHT);
         *height += 1;
         next_state.s[action][*height] = player;
 
-        (ConnectFourGame::empty(), 1 - player)
+        (next_state, 1 - player)
     }
 
     fn get_valid_moves(&self, _: i8) -> Array<u8, Ix1> {
@@ -122,62 +123,81 @@ impl Game for ConnectFourGame {
     }
 
     fn get_game_ended(&self, player: i8) -> f32 {
-        let mut running_sum: usize = 0;
-        let check = |i: usize, j: usize, running_sum: &mut usize| {
-            *running_sum = if self.s[i][j] == player {
-                *running_sum + 1
-            } else {
-                0
-            };
-
-            if running_sum >= &mut DEFAULT_WIN_LENGTH {
-                Some(player)
-            } else {
-                None
-            }
-        };
-
         // left/right
-        for i in 0..DEFAULT_HEIGHT {
-            running_sum = 0;
-            for j in 0..DEFAULT_WIDTH {
-                if check(i, j, &mut running_sum).is_some() {
-                    return player as f32;
+        for row in 0..DEFAULT_HEIGHT {
+            for col in 0..DEFAULT_WIDTH - DEFAULT_WIN_LENGTH {
+                if self.s[row][col] != 0
+                    && [self.s[row][col]; DEFAULT_WIN_LENGTH]
+                        == self.s[row][col..col + DEFAULT_WIN_LENGTH]
+                {
+                    return if player == self.s[row][col] {
+                        1f32
+                    } else {
+                        -1f32
+                    };
                 }
             }
         }
 
         // up/down
-        for j in 0..DEFAULT_WIDTH {
-            for i in 0..DEFAULT_HEIGHT {
-                if check(i, j, &mut running_sum).is_some() {
-                    return player as f32;
+        for row in 0..DEFAULT_HEIGHT - DEFAULT_WIN_LENGTH {
+            for col in 0..DEFAULT_WIDTH {
+                if self.s[row][col] != 0
+                    && [self.s[row][col]; DEFAULT_WIN_LENGTH]
+                        == [
+                            self.s[row][col],
+                            self.s[row + 1][col],
+                            self.s[row + 2][col],
+                            self.s[row + 3][col],
+                        ]
+                {
+                    return if player == self.s[row][col] {
+                        1f32
+                    } else {
+                        -1f32
+                    };
                 }
             }
         }
 
         // diagonal +1/+1
-        for k in 0..DEFAULT_WIDTH + DEFAULT_HEIGHT - 2 {
-            for j in 0..k {
-                let i = k - j;
-                if i < DEFAULT_HEIGHT
-                    && j < DEFAULT_WIDTH
-                    && check(i, j, &mut running_sum).is_some()
+        for row in 0..DEFAULT_HEIGHT - DEFAULT_WIN_LENGTH {
+            for col in 0..DEFAULT_WIDTH - DEFAULT_WIN_LENGTH {
+                if self.s[row][col] != 0
+                    && [self.s[row][col]; DEFAULT_WIN_LENGTH]
+                        == [
+                            self.s[row][col],
+                            self.s[row + 1][col + 1],
+                            self.s[row + 2][col + 2],
+                            self.s[row + 3][col + 3],
+                        ]
                 {
-                    return player as f32;
+                    return if player == self.s[row][col] {
+                        1f32
+                    } else {
+                        -1f32
+                    };
                 }
             }
         }
 
         // diagonal +1/-1
-        for k in 0..DEFAULT_WIDTH + DEFAULT_HEIGHT - 2 {
-            for j in (0..k).rev() {
-                let i = k - j;
-                if i < DEFAULT_HEIGHT
-                    && j < DEFAULT_WIDTH
-                    && check(i, j, &mut running_sum).is_some()
+        for row in 0..DEFAULT_HEIGHT {
+            for col in DEFAULT_WIN_LENGTH..DEFAULT_WIDTH {
+                if self.s[row][col] != 0
+                    && [self.s[row][col]; DEFAULT_WIN_LENGTH]
+                        == [
+                            self.s[row][col],
+                            self.s[row][col - 1],
+                            self.s[row][col - 2],
+                            self.s[row][col - 3],
+                        ]
                 {
-                    return player as f32;
+                    return if player == self.s[row][col] {
+                        1f32
+                    } else {
+                        -1f32
+                    };
                 }
             }
         }
