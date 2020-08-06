@@ -33,7 +33,7 @@ pub type ArcBatchedValue = ArcArray<f32, Ix1>;
 pub type SOATrainingSamples = (ArcBatchedBoardFeatures, ArcBatchedPolicy, ArcBatchedValue);
 
 pub trait NNet {
-    fn new<P: AsRef<Path>>(checkpoint: &P) -> Self;
+    fn new<P: AsRef<Path>>(checkpoint: P) -> Self;
 
     fn train(&mut self, examples: SOATrainingSamples, previous_model_id: usize, model_id: usize);
 
