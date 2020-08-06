@@ -17,6 +17,7 @@ use crate::nnet::*;
 
 pub struct Coach {
     history: VecDeque<VecDeque<TrainingSample>>,
+    mcts_reserve_size: usize,
     update_threshold: f32,
     temp_threshold: usize,
     max_history_length: usize,
@@ -36,6 +37,7 @@ impl Coach {
     #[allow(clippy::too_many_arguments)]
     pub fn setup<P: AsRef<Path>>(
         checkpoint_directory: P,
+        mcts_reserve_size: usize,
         update_threshold: f32,
         temp_threshold: usize,
         max_history_length: usize,
@@ -82,7 +84,8 @@ impl Coach {
 
         Coach {
             history,
-            update_threshold: update_threshold,
+            mcts_reserve_size,
+            update_threshold,
             temp_threshold,
             max_history_length,
             max_queue_length,
@@ -241,6 +244,7 @@ impl Coach {
                                 .into_par_iter()
                                 .map(|episode_id| {
                                     let mcts = AsyncMcts::<G>::default(
+                                        self.mcts_reserve_size,
                                         self.num_sims,
                                         self.num_sim_threads,
                                         self.max_depth,
@@ -327,6 +331,7 @@ impl Coach {
 
                 // Old MCTS
                 let pmcts = AsyncMcts::<G>::default(
+                    self.mcts_reserve_size,
                     self.num_sims,
                     self.num_sim_threads,
                     self.max_depth,
@@ -338,6 +343,7 @@ impl Coach {
 
                 // New (trained) MCTS
                 let nmcts = AsyncMcts::<G>::default(
+                    self.mcts_reserve_size,
                     self.num_sims,
                     self.num_sim_threads,
                     self.max_depth,

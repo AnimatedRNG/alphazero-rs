@@ -1,18 +1,13 @@
-use array_init::array_init;
 use ccl::dhashmap::DHashMap;
 use crossbeam::atomic::AtomicCell;
 use ndarray::{Array, Ix1};
-use std::alloc::{AllocInit, AllocRef, Global, Layout};
 use std::cell::UnsafeCell;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
-use std::ptr::{self, NonNull, Unique};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use crate::game::Game;
 use std::hash::{Hash, Hasher};
-
-const MAX_SEGMENTS: usize = 32;
 
 const EPS: f32 = 1e-6;
 const WIN_SCALE: f32 = 100.0f32;
@@ -132,230 +127,27 @@ impl<G: Game> Hash for Node<G> {
 }
 
 type NodeLink<G> = (Node<G>, Option<usize>);
-
-struct RawNodeStore<G: Game> {
-    ptr: [UnsafeCell<Option<Unique<NodeLink<G>>>>; MAX_SEGMENTS],
-    protected: [UnsafeCell<Option<Unique<AtomicBool>>>; MAX_SEGMENTS],
-    segments: [AtomicUsize; MAX_SEGMENTS],
-    num_segments: AtomicUsize,
-    cap: AtomicUsize,
-    growing: AtomicBool,
-}
-
-impl<G: Game> RawNodeStore<G> {
-    fn new(reserve_space: usize) -> Self {
-        let cap = reserve_space;
-        assert!(cap > 1024);
-
-        unsafe {
-            let ptr = Global.alloc(
-                Layout::array::<NodeLink<G>>(reserve_space).unwrap(),
-                AllocInit::Uninitialized,
-            );
-            let ptr = Unique::new_unchecked(ptr.unwrap().ptr.as_ptr() as *mut _);
-
-            let protected_ptr = Global.alloc(
-                Layout::array::<AtomicBool>(reserve_space).unwrap(),
-                AllocInit::Uninitialized,
-            );
-            let protected_ptr =
-                Unique::new_unchecked(protected_ptr.unwrap().ptr.as_ptr() as *mut _);
-
-            let mut ptrs: [UnsafeCell<_>; MAX_SEGMENTS] = array_init(|_| UnsafeCell::new(None));
-            let mut protected_ptrs: [UnsafeCell<_>; MAX_SEGMENTS] =
-                array_init(|_| UnsafeCell::new(None));
-            ptrs[0] = UnsafeCell::new(Some(ptr));
-            protected_ptrs[0] = UnsafeCell::new(Some(protected_ptr));
-
-            let segments: [AtomicUsize; MAX_SEGMENTS] =
-                array_init(|_| AtomicUsize::new(1 << (MAX_SEGMENTS + 1)));
-            segments[0].store(reserve_space, Ordering::SeqCst);
-
-            RawNodeStore {
-                ptr: ptrs,
-                protected: protected_ptrs,
-                segments,
-                num_segments: AtomicUsize::new(1),
-                cap: AtomicUsize::new(cap),
-                growing: AtomicBool::new(false),
-            }
-        }
-    }
-
-    fn grow(&self) -> bool {
-        if self
-            .growing
-            .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::Relaxed)
-            .is_err()
-        {
-            return false;
-        }
-
-        let elem_size = std::mem::size_of::<NodeLink<G>>();
-        assert!(elem_size != 0, "capacity overflow");
-
-        let cap = self.cap.load(Ordering::SeqCst);
-        let new_cap = 2 * cap;
-
-        let segment_idx = self.num_segments.fetch_add(1, Ordering::SeqCst);
-
-        unsafe {
-            let new_ptr = Global.alloc(
-                Layout::array::<NodeLink<G>>(cap).unwrap(),
-                AllocInit::Uninitialized,
-            );
-            let new_ptr = Unique::new_unchecked(new_ptr.unwrap().ptr.as_ptr() as *mut _);
-            *self.ptr[segment_idx].get() = Some(new_ptr);
-
-            let new_protected_ptr =
-                Global.alloc(Layout::array::<AtomicBool>(cap).unwrap(), AllocInit::Zeroed);
-
-            let new_protected_ptr =
-                Unique::new_unchecked(new_protected_ptr.unwrap().ptr.as_ptr() as *mut _);
-            *self.protected[segment_idx].get() = Some(new_protected_ptr);
-        }
-
-        self.segments[segment_idx].store(2 * cap, Ordering::SeqCst);
-        self.cap.store(new_cap, Ordering::SeqCst);
-        self.growing.store(false, Ordering::SeqCst);
-
-        true
-    }
-}
-
-impl<G: Game> Drop for RawNodeStore<G> {
-    // TODO: Fix potential race-condition memory leak on drop
-    fn drop(&mut self) {
-        let elem_size = std::mem::size_of::<NodeLink<G>>();
-        self.growing.store(true, Ordering::SeqCst);
-        let cap = self.cap.load(Ordering::SeqCst);
-        if cap != 0 && elem_size != 0 {
-            for i in 0..self.num_segments.load(Ordering::SeqCst) {
-                let ptr = unsafe { self.ptr[i].get().as_ref() }.unwrap().unwrap();
-                unsafe {
-                    let c: NonNull<NodeLink<G>> = ptr.into();
-                    Global.dealloc(c.cast(), Layout::array::<Node<G>>(cap).unwrap());
-                }
-            }
-        }
-    }
-}
+type NodeMutex<G> = (AtomicBool, UnsafeCell<Option<NodeLink<G>>>);
 
 pub struct NodeStore<G: Game> {
-    buf: RawNodeStore<G>,
+    buf: Vec<NodeMutex<G>>,
     pub len: AtomicUsize,
     pub seen: DHashMap<G, usize>,
 }
 
-impl<G: Game> Drop for NodeStore<G> {
-    fn drop(&mut self) {
-        // spinlock till we drop
-        loop {
-            if self
-                .buf
-                .growing
-                .compare_exchange_weak(false, true, Ordering::SeqCst, Ordering::Relaxed)
-                .is_ok()
-            {
-                break;
-            }
-        }
-
-        for i in 0..self.len.load(Ordering::SeqCst) {
-            // drop everything first
-            unsafe { drop(std::ptr::read(self.offset_ptr(i))) }
-            unsafe { drop(std::ptr::read(self.offset_protected_ptr(i))) }
-        }
-    }
-}
-
 #[derive(PartialEq)]
 pub enum NodeState {
-    DoesNotExist,
     PlaceHolder,
     Locked,
     Exists(bool),
 }
 
 impl<G: Game> NodeStore<G> {
-    fn get_segment_idx(&self, i: usize) -> usize {
-        let num_segments = self.buf.num_segments.load(Ordering::SeqCst);
-        debug_assert!(i < self.buf.segments[num_segments - 1].load(Ordering::SeqCst));
-        let segment = match self
-            .buf
-            .segments
-            .binary_search_by_key(&i, |segment_id| segment_id.load(Ordering::SeqCst))
-        {
-            Ok(segment) => segment + 1,
-            Err(segment) => segment,
-        };
-        debug_assert!(segment < num_segments);
-        segment
-    }
-
-    fn offset_ptr(&self, i: usize) -> *const NodeLink<G> {
-        let segment_idx = self.get_segment_idx(i);
-
-        let start_idx = if segment_idx > 0 {
-            self.buf.segments[segment_idx - 1].load(Ordering::SeqCst)
-        } else {
-            0
-        };
-
-        unsafe {
-            self.buf.ptr[segment_idx]
-                .get()
-                .as_ref()
-                .unwrap()
-                .unwrap()
-                .as_ptr()
-                .add(i - start_idx)
-        }
-    }
-
-    fn offset_ptr_mut(&self, i: usize) -> *mut NodeLink<G> {
-        let segment_idx = self.get_segment_idx(i);
-
-        let start_idx = if segment_idx > 0 {
-            self.buf.segments[segment_idx - 1].load(Ordering::SeqCst)
-        } else {
-            0
-        };
-
-        unsafe {
-            self.buf.ptr[segment_idx]
-                .get()
-                .as_ref()
-                .unwrap()
-                .unwrap()
-                .as_ptr()
-                .add(i - start_idx)
-        }
-    }
-
-    fn offset_protected_ptr(&self, i: usize) -> *const AtomicBool {
-        let segment_idx = self.get_segment_idx(i);
-
-        let start_idx = if segment_idx > 0 {
-            self.buf.segments[segment_idx - 1].load(Ordering::SeqCst)
-        } else {
-            0
-        };
-
-        unsafe {
-            self.buf.protected[segment_idx]
-                .get()
-                .as_ref()
-                .unwrap()
-                .unwrap()
-                .as_ptr()
-                .add(i - start_idx)
-        }
-    }
-
     pub fn empty(reserve_space: usize) -> Self {
         NodeStore {
-            buf: RawNodeStore::new(reserve_space),
+            buf: (0..reserve_space)
+                .map(|_| (AtomicBool::new(false), UnsafeCell::new(None)))
+                .collect(),
             len: AtomicUsize::new(0),
             seen: DHashMap::default(),
         }
@@ -388,9 +180,11 @@ impl<G: Game> NodeStore<G> {
         let mut l = idx;
         let len = self.len.load(Ordering::Acquire);
         loop {
-            debug_assert!(idx < len);
+            if l >= len {
+                return None;
+            }
 
-            match unsafe { self.offset_ptr(l).as_ref() } {
+            match unsafe { &self.buf[l].1.get().as_ref().unwrap() } {
                 Some((_, None)) => return Some(l),
                 Some((_, Some(s))) => l = *s,
                 None => return None,
@@ -401,7 +195,9 @@ impl<G: Game> NodeStore<G> {
     pub fn get(&self, idx: usize) -> Option<Pin<&Node<G>>> {
         let l = self.resolve(idx);
 
-        l.map(|l| unsafe { Pin::new_unchecked(&self.offset_ptr(l).as_ref().unwrap().0) })
+        l.map(|l| unsafe {
+            Pin::new_unchecked(&self.buf[l].1.get().as_ref().unwrap().as_ref().unwrap().0)
+        })
     }
 
     pub fn lookup_state_id(&self, s: &G) -> Option<usize> {
@@ -416,10 +212,19 @@ impl<G: Game> NodeStore<G> {
     pub fn set_policy(&self, idx: usize, policy: Array<f32, Ix1>) -> bool {
         let l = self.resolve(idx);
 
-        if self.state(idx) != NodeState::Locked {
+        if self.state(idx) != Some(NodeState::Locked) {
             false
         } else {
-            let r = unsafe { &mut self.offset_ptr_mut(l.unwrap()).as_mut().unwrap().0 };
+            let r = unsafe {
+                &mut self.buf[l.unwrap()]
+                    .1
+                    .get()
+                    .as_mut()
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+                    .0
+            };
             r.mu.p = Some(policy);
 
             true
@@ -427,127 +232,112 @@ impl<G: Game> NodeStore<G> {
     }
 
     pub fn push(&self, node: Node<G>) -> usize {
-        // grow the buffer once we've exceeded the halfway
-        // point
+        // increment the buffer pointer
         let idx = self.len.fetch_add(1, Ordering::SeqCst);
-        if idx == self.buf.cap.load(Ordering::SeqCst) / 2 {
-            self.buf.grow();
-        }
+        assert!(idx < self.buf.len());
 
-        // in most cases this will never happen, but
-        // we cannot continue until the buffer is big enough
-        while idx >= self.buf.cap.load(Ordering::SeqCst) {}
+        let buf_idx = unsafe { self.buf[idx].1.get().as_mut().unwrap() };
 
-        unsafe { ptr::write(self.offset_ptr(idx) as *mut NodeLink<G>, (node, None)) };
-
-        // probably not needed because of our allocation strategy of zeroing?
-        unsafe {
-            self.offset_protected_ptr(idx)
-                .as_ref()
-                .unwrap()
-                .store(false, Ordering::SeqCst)
-        };
+        *buf_idx = Some((node, None));
 
         idx
     }
 
-    pub fn state(&self, idx: usize) -> NodeState {
+    pub fn state(&self, idx: usize) -> Option<NodeState> {
         if idx < self.len() {
-            let protected = unsafe { self.offset_protected_ptr(idx).as_ref() }.unwrap();
-            if protected.load(Ordering::SeqCst) {
-                NodeState::Locked
+            if self.buf[idx].0.load(Ordering::SeqCst) {
+                Some(NodeState::Locked)
             } else {
-                let nodelink = unsafe { self.offset_ptr(idx).as_ref() }.unwrap();
-                if nodelink.1.is_none() {
-                    if nodelink.0.mu.s.is_some() {
-                        NodeState::Exists(true)
-                    } else {
-                        NodeState::PlaceHolder
+                let nodelink = unsafe { self.buf[idx].1.get().as_ref().unwrap() };
+                match nodelink.as_ref() {
+                    None => None,
+                    Some(nodelink) => {
+                        if nodelink.1.is_none() {
+                            if nodelink.0.mu.s.is_some() {
+                                Some(NodeState::Exists(true))
+                            } else {
+                                Some(NodeState::PlaceHolder)
+                            }
+                        } else {
+                            Some(NodeState::Exists(false))
+                        }
                     }
-                } else {
-                    NodeState::Exists(false)
                 }
             }
         } else {
-            NodeState::DoesNotExist
+            None
         }
     }
 
     pub fn upgrade(&self, idx: usize, s: G) -> Option<bool> {
-        let ptr = self.offset_ptr(idx) as *mut NodeLink<G>;
-
-        if ptr.is_null() {
+        if idx >= self.len() {
             None
         } else {
-            let old_node = unsafe { &mut *ptr };
-            let node_link: &mut Option<usize> = &mut old_node.1;
+            let old_node = unsafe { self.buf[idx].1.get().as_mut().unwrap().as_mut().unwrap() };
+            let link: &mut Option<usize> = &mut old_node.1;
 
-            if node_link.is_none() {
-                let old_node = &mut old_node.0;
-                let existing_idx = self.seen.get(&s);
-                match existing_idx {
-                    Some(existing_idx) => {
-                        *node_link = Some(*existing_idx);
-                        self.unlock(idx);
+            assert!(link.is_none() == true);
 
-                        Some(false)
-                    }
-                    None => {
-                        let mu: &mut NodeMutableState<G> = &mut old_node.mu;
-                        mu.s = Some(s.clone());
-                        let game_ended = s.get_game_ended(1);
-                        old_node.e.store((-game_ended) as f32);
+            let old_node = &mut old_node.0;
+            let existing_idx = self.seen.get(&s);
 
-                        if game_ended == 0 {
-                            let valids = s.get_valid_moves(1);
-                            let valid_actions: Vec<_> = valids
-                                .indexed_iter()
-                                .filter_map(
-                                    |(index, &item)| {
-                                        if item != 0 {
-                                            Some(index as u8)
-                                        } else {
-                                            None
-                                        }
-                                    },
-                                )
-                                .collect();
-                            old_node.children.reserve(valid_actions.len());
-                            old_node.mu.v = Some(valids);
-
-                            for a in valid_actions {
-                                let mut child_node = Node::empty(WIN_SCALE);
-                                child_node.a = a;
-                                old_node.children.push(self.push(child_node));
-                            }
-                        }
-
-                        self.seen.insert(s.clone(), idx);
-
-                        Some(true)
-                    }
+            match existing_idx {
+                Some(existing_idx) => {
+                    *link = Some(*existing_idx);
+                    self.unlock(idx);
+                    Some(false)
                 }
-            } else {
-                panic!("MCTS tried to upgrade already constructed Node!");
+                None => {
+                    let mu: &mut NodeMutableState<G> = &mut old_node.mu;
+                    mu.s = Some(s.clone());
+                    let game_ended = s.get_game_ended(1);
+                    old_node.e.store((-game_ended) as f32);
+
+                    if game_ended == 0 {
+                        let valids = s.get_valid_moves(1);
+                        let valid_actions: Vec<_> = valids
+                            .indexed_iter()
+                            .filter_map(
+                                |(index, &item)| {
+                                    if item != 0 {
+                                        Some(index as u8)
+                                    } else {
+                                        None
+                                    }
+                                },
+                            )
+                            .collect();
+                        old_node.children.reserve(valid_actions.len());
+                        old_node.mu.v = Some(valids);
+
+                        for a in valid_actions {
+                            let mut child_node = Node::empty(WIN_SCALE);
+                            child_node.a = a;
+                            old_node.children.push(self.push(child_node));
+                        }
+                    }
+
+                    self.seen.insert(s.clone(), idx);
+
+                    Some(true)
+                }
             }
         }
     }
 
     pub fn lock(&self, idx: usize) -> bool {
-        let protected = unsafe { self.offset_protected_ptr(idx).as_ref() }.unwrap();
-        protected
+        self.buf[idx]
+            .0
             .compare_exchange(false, true, Ordering::SeqCst, Ordering::Relaxed)
             .is_ok()
     }
 
     pub fn unlock(&self, idx: usize) {
-        unsafe {
-            let protected = self.offset_protected_ptr(idx).as_ref().unwrap();
-            let unlocked = protected
-                .compare_exchange(true, false, Ordering::SeqCst, Ordering::Relaxed)
-                .unwrap();
-            debug_assert!(unlocked);
-        }
+        let unlocked = self.buf[idx]
+            .0
+            .compare_exchange(true, false, Ordering::SeqCst, Ordering::Relaxed)
+            .is_ok();
+        debug_assert!(unlocked);
     }
 
     fn sort_children(&self, buf: &mut Vec<(usize, f32)>, node: &Node<G>, cpuct: i32) {
@@ -595,15 +385,15 @@ impl<G: Game> NodeStore<G> {
             for (child_idx, _) in &buf {
                 let child_state = self.state(*child_idx);
                 // we know that all children must exist at least
-                if child_state != NodeState::Locked {
-                    if child_state == NodeState::PlaceHolder {
+                if child_state != Some(NodeState::Locked) {
+                    if child_state == Some(NodeState::PlaceHolder) {
                         // try locking this node, but if it doesn't work,
                         // then just keep going
                         if !self.lock(*child_idx) {
                             continue;
                         }
                     }
-                    return (*child_idx, child_state);
+                    return (*child_idx, child_state.unwrap());
                 }
             }
         }
@@ -624,6 +414,7 @@ mod tests {
     use dummy_game::DummyGame;
     use rayon::prelude::*;
     use std::collections::HashMap;
+    use std::ptr;
 
     fn similar(a: f32, b: f32, eps: f32) -> bool {
         f32::abs(a - b) < eps
@@ -708,7 +499,7 @@ mod tests {
     #[test]
     #[allow(clippy::needless_range_loop)]
     fn test_nodestore_many() {
-        let nodes = NodeStore::<DummyGame>::empty(2048);
+        let nodes = NodeStore::<DummyGame>::empty(8192);
 
         let mut idx = Vec::new();
 
@@ -726,7 +517,7 @@ mod tests {
 
     #[test]
     fn test_nodestore_some_parallel() {
-        let nodes = NodeStore::<DummyGame>::empty(2048);
+        let nodes = NodeStore::<DummyGame>::empty(1024);
 
         let idx: HashMap<usize, usize> = (0..1024)
             .into_par_iter()
@@ -745,7 +536,7 @@ mod tests {
 
     #[test]
     fn test_nodestore_many_parallel() {
-        let nodes = NodeStore::<DummyGame>::empty(2048);
+        let nodes = NodeStore::<DummyGame>::empty(8192);
 
         let idx: HashMap<usize, usize> = (0..8192)
             .into_par_iter()
@@ -764,7 +555,7 @@ mod tests {
 
     #[test]
     fn test_nodestore_parallel_push_then_get() {
-        let nodes = NodeStore::<DummyGame>::empty(2048);
+        let nodes = NodeStore::<DummyGame>::empty(8192);
 
         let idx: HashMap<usize, usize> = (0..8192)
             .into_par_iter()
@@ -773,7 +564,7 @@ mod tests {
                 node.e.store(i as f32);
 
                 // not really a great test case
-                if i > 32 && nodes.state((i - 32) as usize) == NodeState::PlaceHolder {
+                if i > 32 && nodes.state((i - 32) as usize) == Some(NodeState::PlaceHolder) {
                     assert!(nodes.get((i - 32) as usize).is_some());
                 }
 
@@ -789,7 +580,7 @@ mod tests {
 
     #[test]
     fn test_nodestore_upgrade_many_similar() {
-        let nodes = NodeStore::<DummyGame>::empty(2048);
+        let nodes = NodeStore::<DummyGame>::empty(8192);
 
         let s = DummyGame::new(0);
 
@@ -801,7 +592,7 @@ mod tests {
                 assert!(nodes.lock(idx));
                 let unique = nodes.upgrade(idx, s.clone()).unwrap();
                 if unique {
-                    assert!(nodes.state(idx) == NodeState::Locked);
+                    assert!(nodes.state(idx) == Some(NodeState::Locked));
                     nodes.unlock(idx);
                 }
 
@@ -842,7 +633,7 @@ mod tests {
         // first insertion of s at location 0 succeeds
         assert!(nodes.lock(0));
         assert!(nodes.upgrade(0, s.clone()).unwrap());
-        assert!(nodes.state(0) == NodeState::Locked);
+        assert!(nodes.state(0) == Some(NodeState::Locked));
 
         let r_ref = nodes.get(idx).unwrap();
 
@@ -857,7 +648,7 @@ mod tests {
 
         nodes.unlock(0);
 
-        assert!(nodes.state(0) == NodeState::Exists(true));
+        assert!(nodes.state(0) == Some(NodeState::Exists(true)));
 
         assert!(nodes.get(idx).unwrap().mu.s.clone().unwrap() == s);
         assert!(nodes.seen.contains_key(&s));
@@ -867,7 +658,7 @@ mod tests {
         nodes.push(node);
         assert!(nodes.lock(1));
         assert!(!nodes.upgrade(1, s).unwrap());
-        assert!(nodes.state(1) == NodeState::Exists(false));
+        assert!(nodes.state(1) == Some(NodeState::Exists(false)));
     }
 
     #[test]
@@ -876,7 +667,7 @@ mod tests {
 
         let node = Node::empty(10000.0f32);
         let idx = nodes.push(node);
-        assert!(nodes.state(idx) == NodeState::PlaceHolder);
+        assert!(nodes.state(idx) == Some(NodeState::PlaceHolder));
 
         let s = DummyGame::new(0);
 
@@ -885,11 +676,11 @@ mod tests {
 
         // trying to lock a second time fails
         assert!(!nodes.lock(idx));
-        assert!(nodes.state(idx) == NodeState::Locked);
+        assert!(nodes.state(idx) == Some(NodeState::Locked));
 
         nodes.unlock(idx);
 
         // now it is unlocked
-        assert!(nodes.state(idx) == NodeState::Exists(true));
+        assert!(nodes.state(idx) == Some(NodeState::Exists(true)));
     }
 }

@@ -11,9 +11,8 @@ use crate::game::Game;
 use crate::nnet::*;
 use crate::node::{NodeState, NodeStore};
 
-const RESERVE_SPACE: usize = 2048;
-
 pub struct AsyncMcts<G: Game> {
+    reserve_space: usize,
     nodes: NodeStore<G>,
     num_sims: usize,
     num_threads: usize,
@@ -26,6 +25,7 @@ pub struct AsyncMcts<G: Game> {
 
 impl<G: Game> AsyncMcts<G> {
     pub fn default(
+        reserve_space: usize,
         num_sims: usize,
         num_threads: usize,
         max_depth: usize,
@@ -35,7 +35,8 @@ impl<G: Game> AsyncMcts<G> {
         tx_data: Sender<(usize, usize, SerializedBoardFeatures)>,
     ) -> Self {
         AsyncMcts {
-            nodes: NodeStore::<G>::new(RESERVE_SPACE),
+            reserve_space,
+            nodes: NodeStore::<G>::new(reserve_space),
             num_sims,
             num_threads,
             max_depth,
@@ -48,6 +49,7 @@ impl<G: Game> AsyncMcts<G> {
 
     pub fn from_state(
         s: G,
+        reserve_space: usize,
         num_sims: usize,
         num_threads: usize,
         max_depth: usize,
@@ -57,7 +59,8 @@ impl<G: Game> AsyncMcts<G> {
         tx_data: Sender<(usize, usize, SerializedBoardFeatures)>,
     ) -> Self {
         AsyncMcts {
-            nodes: NodeStore::<G>::from_root(RESERVE_SPACE, s),
+            reserve_space,
+            nodes: NodeStore::<G>::from_root(reserve_space, s),
             num_sims,
             num_threads,
             max_depth,
@@ -267,10 +270,7 @@ impl<G: Game> AsyncMcts<G> {
                         p_s_id = current_head_id;
                     }
 
-                    debug_assert!(
-                        best_child_state != NodeState::DoesNotExist
-                            && best_child_state != NodeState::PlaceHolder
-                    );
+                    debug_assert!(best_child_state != NodeState::PlaceHolder);
 
                     node_path.push(current_head_id);
                     current_head_id = best_child_id;
@@ -356,7 +356,6 @@ impl<G: Game> AsyncMcts<G> {
                     };
                 }
                 NodeState::PlaceHolder => panic!("Node was not upgraded somehow?"),
-                _ => panic!("Reached non-existant node!"),
             };
         };
 
