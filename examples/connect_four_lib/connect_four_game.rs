@@ -107,7 +107,7 @@ impl Game for ConnectFourGame {
         *height += 1;
         next_state.s[*height][action] = player;
 
-        (next_state, 1 - player)
+        (next_state, -player)
     }
 
     fn get_valid_moves(&self, _: i8) -> Array<u8, Ix1> {
