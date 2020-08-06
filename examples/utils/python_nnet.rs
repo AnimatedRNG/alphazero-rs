@@ -17,7 +17,7 @@ pub struct PythonNNet<M> {
     phantom: PhantomData<M>,
     module: Py<PyModule>,
     model: PyObject,
-    checkpoint: PathBuf
+    checkpoint: PathBuf,
 }
 
 impl<M> NNet for PythonNNet<M>
@@ -37,7 +37,7 @@ where
             phantom: PhantomData,
             module: module.into(),
             model: model,
-            checkpoint: checkpoint.as_ref().to_path_buf()
+            checkpoint: checkpoint.as_ref().to_path_buf(),
         }
     }
 
