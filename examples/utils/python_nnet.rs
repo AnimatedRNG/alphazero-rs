@@ -65,7 +65,7 @@ where
         let model = if self.last_model != previous_model_id {
             module
                 .call(
-                    "load_model",
+                    "load_checkpoint",
                     (self.model.as_ref(py), model_id, checkpoint_str.clone()),
                     None,
                 )
@@ -78,7 +78,7 @@ where
             .call("train_model", (self.model.as_ref(py), examples), None)
             .unwrap();
         module
-            .call("save_model", (model, model_id, checkpoint_str), None)
+            .call("save_checkpoint", (model, model_id, checkpoint_str), None)
             .unwrap();
 
         self.model = new_model.to_object(py);
@@ -106,7 +106,7 @@ where
         let model = if self.last_model != model_id {
             module
                 .call(
-                    "load_model",
+                    "load_checkpoint",
                     (self.model.as_ref(py), model_id, checkpoint_str),
                     None,
                 )
