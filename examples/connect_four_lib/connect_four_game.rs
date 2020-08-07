@@ -217,12 +217,12 @@ impl Game for ConnectFourGame {
 
     #[allow(clippy::if_same_then_else)]
     fn to_features(&self) -> ArrayD<F> {
-        let mut f = ArrayD::zeros(IxDyn(&[2, DEFAULT_HEIGHT, DEFAULT_WIDTH]));
+        let mut f = ArrayD::zeros(IxDyn(&[DEFAULT_HEIGHT, DEFAULT_WIDTH, 2]));
 
         f.indexed_iter_mut().for_each(|(tup, v)| {
-            let c = tup[0];
-            let i = tup[1];
-            let j = tup[2];
+            let i = tup[0];
+            let j = tup[1];
+            let c = tup[2];
 
             *v = if self.s[i][j] == self.me && c == 0 {
                 1.0 as F
